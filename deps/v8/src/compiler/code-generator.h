@@ -74,12 +74,6 @@ class DeoptimizationLiteral {
   double number_;
 };
 
-enum class CodeGeneratorPoisoningLevel {
-  kDontPoison,
-  kPoisonStackPointerInPrologue,
-  kPoisonAll
-};
-
 // Generates native code for a sequence of instructions.
 class CodeGenerator final : public GapResolver::Assembler {
  public:
@@ -90,7 +84,7 @@ class CodeGenerator final : public GapResolver::Assembler {
                          int start_source_position,
                          JumpOptimizationInfo* jump_opt,
                          WasmCompilationData* wasm_compilation_data,
-                         CodeGeneratorPoisoningLevel poisoning_level);
+                         PoisoningMitigationLevel poisoning_level);
 
   // Generate native code. After calling AssembleCode, call FinalizeCode to
   // produce the actual code object. If an error occurs during either phase,
@@ -128,6 +122,9 @@ class CodeGenerator final : public GapResolver::Assembler {
   TurboAssembler* tasm() { return &tasm_; }
   size_t GetSafepointTableOffset() const { return safepoints_.GetCodeOffset(); }
   size_t GetHandlerTableOffset() const { return handler_table_offset_; }
+
+  const ZoneVector<int>& block_starts() const { return block_starts_; }
+  const ZoneVector<int>& instr_starts() const { return instr_starts_; }
 
  private:
   GapResolver* resolver() { return &resolver_; }
@@ -181,6 +178,9 @@ class CodeGenerator final : public GapResolver::Assembler {
   // pointer before execution. The stack slot index to the empty slot above the
   // adjusted stack pointer is returned in |slot|.
   bool GetSlotAboveSPBeforeTailCall(Instruction* instr, int* slot);
+
+  // Determines how to call helper stubs depending on the code kind.
+  StubCallMode DetermineStubCallMode() const;
 
   CodeGenResult AssembleDeoptimizerCall(int deoptimization_id,
                                         SourcePosition pos);
@@ -421,7 +421,9 @@ class CodeGenerator final : public GapResolver::Assembler {
   SourcePositionTableBuilder source_position_table_builder_;
   WasmCompilationData* wasm_compilation_data_;
   CodeGenResult result_;
-  CodeGeneratorPoisoningLevel poisoning_level_;
+  PoisoningMitigationLevel poisoning_level_;
+  ZoneVector<int> block_starts_;
+  ZoneVector<int> instr_starts_;
 };
 
 }  // namespace compiler

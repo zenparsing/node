@@ -117,11 +117,10 @@ bool LocationOperand::IsCompatible(LocationOperand* op) {
 }
 
 void InstructionOperand::Print(const RegisterConfiguration* config) const {
-  OFStream os(stdout);
   PrintableInstructionOperand wrapper;
   wrapper.register_configuration_ = config;
   wrapper.op_ = *this;
-  os << wrapper << std::endl;
+  StdoutStream{} << wrapper << std::endl;
 }
 
 void InstructionOperand::Print() const { Print(GetRegConfig()); }
@@ -249,7 +248,7 @@ std::ostream& operator<<(std::ostream& os,
 }
 
 void MoveOperands::Print(const RegisterConfiguration* config) const {
-  OFStream os(stdout);
+  StdoutStream os;
   PrintableInstructionOperand wrapper;
   wrapper.register_configuration_ = config;
   wrapper.op_ = destination();
@@ -367,11 +366,10 @@ bool Instruction::AreMovesRedundant() const {
 }
 
 void Instruction::Print(const RegisterConfiguration* config) const {
-  OFStream os(stdout);
   PrintableInstruction wrapper;
   wrapper.instr_ = this;
   wrapper.register_configuration_ = config;
-  os << wrapper << std::endl;
+  StdoutStream{} << wrapper << std::endl;
 }
 
 void Instruction::Print() const { Print(GetRegConfig()); }
@@ -603,8 +601,7 @@ std::ostream& operator<<(std::ostream& os, const Constant& constant) {
     case Constant::kFloat64:
       return os << constant.ToFloat64().value();
     case Constant::kExternalReference:
-      return os << static_cast<const void*>(
-                       constant.ToExternalReference().address());
+      return os << constant.ToExternalReference().address();
     case Constant::kHeapObject:
       return os << Brief(*constant.ToHeapObject());
     case Constant::kRpoNumber:
@@ -692,7 +689,7 @@ static InstructionBlock* InstructionBlockFor(Zone* zone,
 }
 
 std::ostream& operator<<(std::ostream& os,
-                         PrintableInstructionBlock& printable_block) {
+                         const PrintableInstructionBlock& printable_block) {
   const InstructionBlock* block = printable_block.block_;
   const RegisterConfiguration* config = printable_block.register_configuration_;
   const InstructionSequence* code = printable_block.code_;
@@ -870,12 +867,8 @@ void InstructionSequence::StartBlock(RpoNumber rpo) {
 void InstructionSequence::EndBlock(RpoNumber rpo) {
   int end = static_cast<int>(instructions_.size());
   DCHECK_EQ(current_block_->rpo_number(), rpo);
-  if (current_block_->code_start() == end) {  // Empty block.  Insert a nop.
-    AddInstruction(Instruction::New(zone(), kArchNop));
-    end = static_cast<int>(instructions_.size());
-  }
-  DCHECK(current_block_->code_start() >= 0 &&
-         current_block_->code_start() < end);
+  CHECK(current_block_->code_start() >= 0 &&
+        current_block_->code_start() < end);
   current_block_->set_code_end(end);
   current_block_ = nullptr;
 }
@@ -991,23 +984,21 @@ void InstructionSequence::SetSourcePosition(const Instruction* instr,
 }
 
 void InstructionSequence::Print(const RegisterConfiguration* config) const {
-  OFStream os(stdout);
   PrintableInstructionSequence wrapper;
   wrapper.register_configuration_ = config;
   wrapper.sequence_ = this;
-  os << wrapper << std::endl;
+  StdoutStream{} << wrapper << std::endl;
 }
 
 void InstructionSequence::Print() const { Print(GetRegConfig()); }
 
 void InstructionSequence::PrintBlock(const RegisterConfiguration* config,
                                      int block_id) const {
-  OFStream os(stdout);
   RpoNumber rpo = RpoNumber::FromInt(block_id);
   const InstructionBlock* block = InstructionBlockAt(rpo);
   CHECK(block->rpo_number() == rpo);
   PrintableInstructionBlock printable_block = {config, block, this};
-  os << printable_block << std::endl;
+  StdoutStream{} << printable_block << std::endl;
 }
 
 void InstructionSequence::PrintBlock(int block_id) const {

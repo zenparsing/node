@@ -10,6 +10,7 @@
 #include "src/field-type.h"
 #include "src/messages.h"
 #include "src/objects-inl.h"
+#include "src/objects/hash-table-inl.h"
 #include "src/property-descriptor.h"
 #include "src/string-hasher.h"
 #include "src/transitions.h"
@@ -403,7 +404,7 @@ Handle<Object> JsonParser<seq_one_byte>::ParseJsonObject() {
       Handle<Map> target;
       if (seq_one_byte) {
         DisallowHeapAllocation no_gc;
-        TransitionsAccessor transitions(*map, &no_gc);
+        TransitionsAccessor transitions(isolate(), *map, &no_gc);
         key = transitions.ExpectedTransitionKey();
         follow_expected = !key.is_null() && ParseJsonString(key);
         // If the expected transition hits, follow it.
@@ -418,9 +419,9 @@ Handle<Object> JsonParser<seq_one_byte>::ParseJsonObject() {
         if (key.is_null()) return ReportUnexpectedCharacter();
 
         // If a transition was found, follow it and continue.
-        transitioning =
-            TransitionsAccessor(map).FindTransitionToField(key).ToHandle(
-                &target);
+        transitioning = TransitionsAccessor(isolate(), map)
+                            .FindTransitionToField(key)
+                            .ToHandle(&target);
       }
       if (c0_ != ':') return ReportUnexpectedCharacter();
 

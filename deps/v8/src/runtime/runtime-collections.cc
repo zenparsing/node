@@ -7,21 +7,11 @@
 #include "src/arguments.h"
 #include "src/conversions-inl.h"
 #include "src/heap/factory.h"
+#include "src/objects/hash-table-inl.h"
+#include "src/objects/js-collection-inl.h"
 
 namespace v8 {
 namespace internal {
-
-RUNTIME_FUNCTION(Runtime_IsJSMapIterator) {
-  SealHandleScope shs(isolate);
-  DCHECK_EQ(1, args.length());
-  return isolate->heap()->ToBoolean(args[0]->IsJSMapIterator());
-}
-
-RUNTIME_FUNCTION(Runtime_IsJSSetIterator) {
-  SealHandleScope shs(isolate);
-  DCHECK_EQ(1, args.length());
-  return isolate->heap()->ToBoolean(args[0]->IsJSSetIterator());
-}
 
 RUNTIME_FUNCTION(Runtime_TheHole) {
   SealHandleScope shs(isolate);
@@ -108,9 +98,9 @@ RUNTIME_FUNCTION(Runtime_WeakCollectionDelete) {
 
 #ifdef DEBUG
   DCHECK(key->IsJSReceiver());
-  DCHECK(ObjectHashTableShape::IsLive(isolate, *key));
-  Handle<ObjectHashTable> table(
-      ObjectHashTable::cast(weak_collection->table()));
+  DCHECK(EphemeronHashTableShape::IsLive(isolate, *key));
+  Handle<EphemeronHashTable> table(
+      EphemeronHashTable::cast(weak_collection->table()));
   // Should only be called when shrinking the table is necessary. See
   // HashTable::Shrink().
   DCHECK(table->NumberOfElements() - 1 <= (table->Capacity() >> 2) &&
@@ -121,6 +111,14 @@ RUNTIME_FUNCTION(Runtime_WeakCollectionDelete) {
   return isolate->heap()->ToBoolean(was_present);
 }
 
+RUNTIME_FUNCTION(Runtime_GetWeakSetValues) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(2, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(JSWeakCollection, holder, 0);
+  CONVERT_NUMBER_CHECKED(int, max_values, Int32, args[1]);
+  CHECK_GE(max_values, 0);
+  return *JSWeakCollection::GetEntries(holder, max_values);
+}
 
 RUNTIME_FUNCTION(Runtime_WeakCollectionSet) {
   HandleScope scope(isolate);
@@ -132,41 +130,17 @@ RUNTIME_FUNCTION(Runtime_WeakCollectionSet) {
 
 #ifdef DEBUG
   DCHECK(key->IsJSReceiver());
-  DCHECK(ObjectHashTableShape::IsLive(isolate, *key));
-  Handle<ObjectHashTable> table(
-      ObjectHashTable::cast(weak_collection->table()));
+  DCHECK(EphemeronHashTableShape::IsLive(isolate, *key));
+  Handle<EphemeronHashTable> table(
+      EphemeronHashTable::cast(weak_collection->table()));
   // Should only be called when rehashing or resizing the table is necessary.
-  // See ObjectHashTable::Put() and HashTable::HasSufficientCapacityToAdd().
+  // See EphemeronHashTable::Put() and HashTable::HasSufficientCapacityToAdd().
   DCHECK((table->NumberOfDeletedElements() << 1) > table->NumberOfElements() ||
          !table->HasSufficientCapacityToAdd(1));
 #endif
 
   JSWeakCollection::Set(weak_collection, key, value, hash);
   return *weak_collection;
-}
-
-
-RUNTIME_FUNCTION(Runtime_GetWeakSetValues) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(2, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSWeakCollection, holder, 0);
-  CONVERT_NUMBER_CHECKED(int, max_values, Int32, args[1]);
-  CHECK_GE(max_values, 0);
-  return *JSWeakCollection::GetEntries(holder, max_values);
-}
-
-RUNTIME_FUNCTION(Runtime_IsJSMap) {
-  SealHandleScope shs(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_CHECKED(Object, obj, 0);
-  return isolate->heap()->ToBoolean(obj->IsJSMap());
-}
-
-RUNTIME_FUNCTION(Runtime_IsJSSet) {
-  SealHandleScope shs(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_CHECKED(Object, obj, 0);
-  return isolate->heap()->ToBoolean(obj->IsJSSet());
 }
 
 RUNTIME_FUNCTION(Runtime_IsJSWeakMap) {

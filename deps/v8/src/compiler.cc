@@ -84,8 +84,9 @@ void LogFunctionCompilation(CodeEventListener::LogEventsAndTags tag,
   // Log the code generation. If source information is available include
   // script name and line number. Check explicitly whether logging is
   // enabled as finding the line number is not free.
-  if (!isolate->logger()->is_logging_code_events() &&
-      !isolate->is_profiling() && !FLAG_log_function_events) {
+  if (!isolate->logger()->is_listening_to_code_events() &&
+      !isolate->is_profiling() && !FLAG_log_function_events &&
+      !isolate->code_event_dispatcher()->IsListeningToCodeEvents()) {
     return;
   }
 
@@ -197,7 +198,7 @@ CompilationJob::Status OptimizedCompilationJob::PrepareJob(Isolate* isolate) {
   DisallowJavascriptExecution no_js(isolate);
 
   if (FLAG_trace_opt && compilation_info()->IsOptimizing()) {
-    OFStream os(stdout);
+    StdoutStream os;
     os << "[compiling method " << Brief(*compilation_info()->closure())
        << " using " << compiler_name_;
     if (compilation_info()->is_osr()) os << " OSR";
@@ -508,8 +509,7 @@ bool FinalizeUnoptimizedCode(
   DCHECK(AllowCompilation::IsAllowed(isolate));
 
   // Allocate scope infos for the literal.
-  DeclarationScope::AllocateScopeInfos(parse_info, isolate,
-                                       AnalyzeMode::kRegular);
+  DeclarationScope::AllocateScopeInfos(parse_info, isolate);
 
   // Finalize the outer-most function's compilation job.
   if (FinalizeUnoptimizedCompilationJob(outer_function_job, shared_info,
@@ -710,7 +710,7 @@ MaybeHandle<Code> GetOptimizedCode(Handle<JSFunction> function,
   // tolerate the lack of a script without bytecode.
   DCHECK_IMPLIES(!has_script, shared->HasBytecodeArray());
   std::unique_ptr<OptimizedCompilationJob> job(
-      compiler::Pipeline::NewCompilationJob(function, has_script));
+      compiler::Pipeline::NewCompilationJob(isolate, function, has_script));
   OptimizedCompilationInfo* compilation_info = job->compilation_info();
 
   compilation_info->SetOptimizingForOsr(osr_offset, osr_frame);
@@ -999,7 +999,7 @@ BackgroundCompileTask::BackgroundCompileTask(ScriptStreamingData* source,
   // Parser needs to stay alive for finalizing the parsing on the main
   // thread.
   source_->parser.reset(new Parser(source_->info.get()));
-  source_->parser->DeserializeScopeChain(source_->info.get(),
+  source_->parser->DeserializeScopeChain(isolate, source_->info.get(),
                                          MaybeHandle<ScopeInfo>());
 }
 
@@ -1076,7 +1076,7 @@ bool Compiler::Compile(Handle<SharedFunctionInfo> shared_info,
   AggregatedHistogramTimerScope timer(isolate->counters()->compile_lazy());
 
   // Set up parse info.
-  ParseInfo parse_info(shared_info);
+  ParseInfo parse_info(isolate, shared_info);
   parse_info.set_lazy_compile();
 
   // Check if the compiler dispatcher has shared_info enqueued for compile.
@@ -1135,7 +1135,7 @@ bool Compiler::Compile(Handle<JSFunction> function, ClearExceptionFlag flag) {
   DCHECK(!function->HasOptimizedCode());
 
   Isolate* isolate = function->GetIsolate();
-  Handle<SharedFunctionInfo> shared_info = handle(function->shared());
+  Handle<SharedFunctionInfo> shared_info = handle(function->shared(), isolate);
 
   // Ensure shared function info is compiled.
   if (!shared_info->is_compiled() && !Compile(shared_info, flag)) return false;
@@ -1213,7 +1213,7 @@ MaybeHandle<JSArray> Compiler::CompileForLiveEdit(Handle<Script> script) {
   script->set_shared_function_infos(isolate->heap()->empty_weak_fixed_array());
 
   // Start a compilation.
-  ParseInfo parse_info(script);
+  ParseInfo parse_info(isolate, script);
   parse_info.set_eager();
 
   // TODO(635): support extensions.
@@ -1295,7 +1295,7 @@ MaybeHandle<JSFunction> Compiler::GetFunctionFromEval(
       // If the position is missing, attempt to get the code offset by
       // walking the stack. Do not translate the code offset into source
       // position, but store it as negative value for lazy translation.
-      StackTraceFrameIterator it(script->GetIsolate());
+      StackTraceFrameIterator it(isolate);
       if (!it.done() && it.is_javascript()) {
         FrameSummary summary = FrameSummary::GetTop(it.javascript_frame());
         script->set_eval_from_shared(
@@ -1307,13 +1307,13 @@ MaybeHandle<JSFunction> Compiler::GetFunctionFromEval(
     }
     script->set_eval_from_position(eval_position);
 
-    ParseInfo parse_info(script);
+    ParseInfo parse_info(isolate, script);
     parse_info.set_eval();
     parse_info.set_language_mode(language_mode);
     parse_info.set_parse_restriction(restriction);
     parse_info.set_parameters_end_pos(parameters_end_pos);
     if (!context->IsNativeContext()) {
-      parse_info.set_outer_scope_info(handle(context->scope_info()));
+      parse_info.set_outer_scope_info(handle(context->scope_info(), isolate));
     }
     DCHECK(!parse_info.is_module());
 
@@ -1356,11 +1356,6 @@ MaybeHandle<JSFunction> Compiler::GetFunctionFromEval(
     }
   }
 
-  // OnAfterCompile has to be called after we create the JSFunction, which we
-  // may require to recompile the eval for debugging, if we find a function
-  // that contains break points in the eval script.
-  isolate->debug()->OnAfterCompile(script);
-
   return result;
 }
 
@@ -1402,7 +1397,8 @@ MaybeHandle<JSFunction> Compiler::GetFunctionFromString(
   // Compile source string in the native context.
   int eval_scope_position = 0;
   int eval_position = kNoSourcePosition;
-  Handle<SharedFunctionInfo> outer_info(native_context->closure()->shared());
+  Handle<SharedFunctionInfo> outer_info(
+      native_context->empty_function()->shared());
   return Compiler::GetFunctionFromEval(
       source, outer_info, native_context, LanguageMode::kSloppy, restriction,
       parameters_end_pos, eval_scope_position, eval_position);
@@ -1690,7 +1686,8 @@ MaybeHandle<SharedFunctionInfo> Compiler::GetSharedFunctionInfoForScript(
       TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.compile"),
                    "V8.CompileDeserialize");
       Handle<SharedFunctionInfo> inner_result;
-      if (CodeSerializer::Deserialize(isolate, cached_data, source)
+      if (CodeSerializer::Deserialize(isolate, cached_data, source,
+                                      origin_options)
               .ToHandle(&inner_result)) {
         // Promote to per-isolate compilation cache.
         DCHECK(inner_result->is_compiled());
@@ -1711,7 +1708,7 @@ MaybeHandle<SharedFunctionInfo> Compiler::GetSharedFunctionInfoForScript(
         NewScript(isolate, source, script_details, origin_options, natives);
 
     // Compile the function and add it to the isolate cache.
-    ParseInfo parse_info(script);
+    ParseInfo parse_info(isolate, script);
     Zone compile_zone(isolate->allocator(), ZONE_NAME);
     if (origin_options.IsModule()) parse_info.set_module();
     parse_info.set_extension(extension);
@@ -1729,12 +1726,6 @@ MaybeHandle<SharedFunctionInfo> Compiler::GetSharedFunctionInfoForScript(
                natives != NATIVES_CODE) {
       isolate->ReportPendingMessages();
     }
-  }
-
-  // On success, report script compilation to debugger.
-  Handle<SharedFunctionInfo> result;
-  if (maybe_result.ToHandle(&result)) {
-    isolate->debug()->OnAfterCompile(handle(Script::cast(result->script())));
   }
 
   return maybe_result;
@@ -1774,7 +1765,8 @@ MaybeHandle<JSFunction> Compiler::GetWrappedFunction(
         isolate, RuntimeCallCounterId::kCompileDeserialize);
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.compile"),
                  "V8.CompileDeserialize");
-    maybe_result = CodeSerializer::Deserialize(isolate, cached_data, source);
+    maybe_result = CodeSerializer::Deserialize(isolate, cached_data, source,
+                                               origin_options);
     if (maybe_result.is_null()) {
       // Deserializer failed. Fall through to compile.
       compile_timer.set_consuming_code_cache_failed();
@@ -1788,12 +1780,12 @@ MaybeHandle<JSFunction> Compiler::GetWrappedFunction(
                        NOT_NATIVES_CODE);
     script->set_wrapped_arguments(*arguments);
 
-    ParseInfo parse_info(script);
+    ParseInfo parse_info(isolate, script);
     parse_info.set_eval();  // Use an eval scope as declaration scope.
     parse_info.set_wrapped_as_function();
     // parse_info.set_eager(compile_options == ScriptCompiler::kEagerCompile);
     if (!context->IsNativeContext()) {
-      parse_info.set_outer_scope_info(handle(context->scope_info()));
+      parse_info.set_outer_scope_info(handle(context->scope_info(), isolate));
     }
     parse_info.set_language_mode(
         stricter_language_mode(parse_info.language_mode(), language_mode));
@@ -1815,14 +1807,8 @@ MaybeHandle<JSFunction> Compiler::GetWrappedFunction(
     script = Handle<Script>(Script::cast(wrapped->script()), isolate);
   }
 
-  Handle<JSFunction> function =
-      isolate->factory()->NewFunctionFromSharedFunctionInfo(wrapped, context,
+  return isolate->factory()->NewFunctionFromSharedFunctionInfo(wrapped, context,
                                                             NOT_TENURED);
-  // OnAfterCompile has to be called after we create the JSFunction, which we
-  // may require to recompile the eval for debugging, if we find a function
-  // that contains break points in the eval script.
-  isolate->debug()->OnAfterCompile(script);
-  return function;
 }
 
 ScriptCompiler::ScriptStreamingTask* Compiler::NewBackgroundCompileTask(
@@ -1890,12 +1876,6 @@ Compiler::GetSharedFunctionInfoForStreamedScript(
       compilation_cache->PutScript(source, isolate->native_context(),
                                    parse_info->language_mode(), result);
     }
-  }
-
-  // On success, report script compilation to debugger.
-  Handle<SharedFunctionInfo> result;
-  if (maybe_result.ToHandle(&result)) {
-    isolate->debug()->OnAfterCompile(handle(Script::cast(result->script())));
   }
 
   streaming_data->Release();
@@ -1979,6 +1959,12 @@ void Compiler::PostInstantiation(Handle<JSFunction> function,
       DCHECK(function->shared()->is_compiled());
       function->set_code(code);
     }
+  }
+
+  if (shared->is_toplevel() || shared->is_wrapped()) {
+    // If it's a top-level script, report compilation to the debugger.
+    Handle<Script> script(handle(Script::cast(shared->script())));
+    script->GetIsolate()->debug()->OnAfterCompile(script);
   }
 }
 

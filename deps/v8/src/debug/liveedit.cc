@@ -836,7 +836,7 @@ void LiveEdit::ReplaceFunctionCode(
     if (shared_info->HasBreakInfo()) {
       // Existing break points will be re-applied. Reset the debug info here.
       isolate->debug()->RemoveBreakInfoAndMaybeFree(
-          handle(shared_info->GetDebugInfo()));
+          handle(shared_info->GetDebugInfo(), isolate));
     }
     shared_info->set_scope_info(new_shared_info->scope_info());
     shared_info->set_feedback_metadata(new_shared_info->feedback_metadata());
@@ -901,7 +901,7 @@ void LiveEdit::SetFunctionScript(Handle<JSValue> function_wrapper,
   SharedFunctionInfo::SetScript(shared_info, script_handle);
   shared_info->DisableOptimization(BailoutReason::kLiveEdit);
 
-  function_wrapper->GetIsolate()->compilation_cache()->Remove(shared_info);
+  isolate->compilation_cache()->Remove(shared_info);
 }
 
 namespace {
@@ -1052,13 +1052,10 @@ Handle<Object> LiveEdit::ChangeScriptSource(Handle<Script> original_script,
   return old_script_object;
 }
 
-
-
 void LiveEdit::ReplaceRefToNestedFunction(
-    Handle<JSValue> parent_function_wrapper,
+    Heap* heap, Handle<JSValue> parent_function_wrapper,
     Handle<JSValue> orig_function_wrapper,
     Handle<JSValue> subst_function_wrapper) {
-
   Handle<SharedFunctionInfo> parent_shared =
       UnwrapSharedFunctionInfoFromJSValue(parent_function_wrapper);
   Handle<SharedFunctionInfo> orig_shared =
@@ -1069,7 +1066,7 @@ void LiveEdit::ReplaceRefToNestedFunction(
   for (RelocIterator it(parent_shared->GetCode()); !it.done(); it.next()) {
     if (it.rinfo()->rmode() == RelocInfo::EMBEDDED_OBJECT) {
       if (it.rinfo()->target_object() == *orig_shared) {
-        it.rinfo()->set_target_object(*subst_shared);
+        it.rinfo()->set_target_object(heap, *subst_shared);
       }
     }
   }

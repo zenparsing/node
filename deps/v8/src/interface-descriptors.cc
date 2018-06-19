@@ -15,7 +15,7 @@ void CallInterfaceDescriptorData::InitializePlatformSpecific(
   register_param_count_ = register_parameter_count;
 
   // InterfaceDescriptor owns a copy of the registers array.
-  register_params_.reset(NewArray<Register>(register_parameter_count, no_reg));
+  register_params_ = NewArray<Register>(register_parameter_count, no_reg);
   for (int i = 0; i < register_parameter_count; i++) {
     register_params_[i] = registers[i];
   }
@@ -27,7 +27,7 @@ void CallInterfaceDescriptorData::InitializePlatformIndependent(
   // InterfaceDescriptor owns a copy of the MachineType array.
   // We only care about parameters, not receiver and result.
   param_count_ = parameter_count + extra_parameter_count;
-  machine_types_.reset(NewArray<MachineType>(param_count_));
+  machine_types_ = NewArray<MachineType>(param_count_);
   for (int i = 0; i < param_count_; i++) {
     if (machine_types == nullptr || i >= parameter_count) {
       machine_types_[i] = MachineType::AnyTagged();
@@ -37,15 +37,57 @@ void CallInterfaceDescriptorData::InitializePlatformIndependent(
   }
 }
 
-const char* CallInterfaceDescriptor::DebugName(Isolate* isolate) const {
-  CallInterfaceDescriptorData* start = isolate->call_descriptor_data(0);
-  size_t index = data_ - start;
-  DCHECK(index < CallDescriptors::NUMBER_OF_DESCRIPTORS);
-  CallDescriptors::Key key = static_cast<CallDescriptors::Key>(index);
+void CallInterfaceDescriptorData::Reset() {
+  delete[] machine_types_;
+  machine_types_ = nullptr;
+  delete[] register_params_;
+  register_params_ = nullptr;
+}
+
+// static
+CallInterfaceDescriptorData
+    CallDescriptors::call_descriptor_data_[NUMBER_OF_DESCRIPTORS];
+
+void CallDescriptors::InitializeOncePerProcess() {
+#define INTERFACE_DESCRIPTOR(name, ...) \
+  name##Descriptor().Initialize(&call_descriptor_data_[CallDescriptors::name]);
+  INTERFACE_DESCRIPTOR_LIST(INTERFACE_DESCRIPTOR)
+#undef INTERFACE_DESCRIPTOR
+}
+
+void CallDescriptors::TearDown() {
+  for (CallInterfaceDescriptorData& data : call_descriptor_data_) {
+    data.Reset();
+  }
+}
+
+void CallInterfaceDescriptor::JSDefaultInitializePlatformSpecific(
+    CallInterfaceDescriptorData* data, int non_js_register_parameter_count) {
+  DCHECK_LE(static_cast<unsigned>(non_js_register_parameter_count), 1);
+
+  // 3 is for kTarget, kNewTarget and kActualArgumentsCount
+  int register_parameter_count = 3 + non_js_register_parameter_count;
+
+  DCHECK(!AreAliased(
+      kJavaScriptCallTargetRegister, kJavaScriptCallNewTargetRegister,
+      kJavaScriptCallArgCountRegister, kJavaScriptCallExtraArg1Register));
+
+  const Register default_js_stub_registers[] = {
+      kJavaScriptCallTargetRegister, kJavaScriptCallNewTargetRegister,
+      kJavaScriptCallArgCountRegister, kJavaScriptCallExtraArg1Register};
+
+  CHECK_LE(static_cast<size_t>(register_parameter_count),
+           arraysize(default_js_stub_registers));
+  data->InitializePlatformSpecific(register_parameter_count,
+                                   default_js_stub_registers);
+}
+
+const char* CallInterfaceDescriptor::DebugName() const {
+  CallDescriptors::Key key = CallDescriptors::GetKey(data_);
   switch (key) {
-#define DEF_CASE(NAME, ...)   \
-  case CallDescriptors::NAME: \
-    return #NAME " Descriptor";
+#define DEF_CASE(name, ...)   \
+  case CallDescriptors::name: \
+    return #name " Descriptor";
     INTERFACE_DESCRIPTOR_LIST(DEF_CASE)
 #undef DEF_CASE
     case CallDescriptors::NUMBER_OF_DESCRIPTORS:
@@ -60,6 +102,19 @@ void VoidDescriptor::InitializePlatformSpecific(
   data->InitializePlatformSpecific(0, nullptr);
 }
 
+void AllocateDescriptor::InitializePlatformSpecific(
+    CallInterfaceDescriptorData* data) {
+  Register registers[] = {kAllocateSizeRegister};
+  data->InitializePlatformSpecific(arraysize(registers), registers);
+}
+
+void AllocateDescriptor::InitializePlatformIndependent(
+    CallInterfaceDescriptorData* data) {
+  MachineType machine_types[] = {MachineType::Int32()};
+  data->InitializePlatformIndependent(arraysize(machine_types), 0,
+                                      machine_types);
+}
+
 void FastNewFunctionContextDescriptor::InitializePlatformIndependent(
     CallInterfaceDescriptorData* data) {
   MachineType machine_types[] = {MachineType::AnyTagged(),
@@ -70,7 +125,7 @@ void FastNewFunctionContextDescriptor::InitializePlatformIndependent(
 
 void FastNewFunctionContextDescriptor::InitializePlatformSpecific(
     CallInterfaceDescriptorData* data) {
-  Register registers[] = {FunctionRegister(), SlotsRegister()};
+  Register registers[] = {ScopeInfoRegister(), SlotsRegister()};
   data->InitializePlatformSpecific(arraysize(registers), registers);
 }
 
@@ -86,16 +141,6 @@ const Register FastNewObjectDescriptor::TargetRegister() {
 
 const Register FastNewObjectDescriptor::NewTargetRegister() {
   return kJavaScriptCallNewTargetRegister;
-}
-
-void FastNewArgumentsDescriptor::InitializePlatformSpecific(
-    CallInterfaceDescriptorData* data) {
-  Register registers[] = {TargetRegister()};
-  data->InitializePlatformSpecific(arraysize(registers), registers);
-}
-
-const Register FastNewArgumentsDescriptor::TargetRegister() {
-  return kJSFunctionRegister;
 }
 
 void RecordWriteDescriptor::InitializePlatformIndependent(
@@ -121,21 +166,6 @@ void LoadDescriptor::InitializePlatformIndependent(
 void LoadDescriptor::InitializePlatformSpecific(
     CallInterfaceDescriptorData* data) {
   Register registers[] = {ReceiverRegister(), NameRegister(), SlotRegister()};
-  data->InitializePlatformSpecific(arraysize(registers), registers);
-}
-
-void LoadFieldDescriptor::InitializePlatformIndependent(
-    CallInterfaceDescriptorData* data) {
-  // kReceiver, kSmiHandler
-  MachineType machine_types[] = {MachineType::AnyTagged(),
-                                 MachineType::AnyTagged()};
-  data->InitializePlatformIndependent(arraysize(machine_types), 0,
-                                      machine_types);
-}
-
-void LoadFieldDescriptor::InitializePlatformSpecific(
-    CallInterfaceDescriptorData* data) {
-  Register registers[] = {ReceiverRegister(), SmiHandlerRegister()};
   data->InitializePlatformSpecific(arraysize(registers), registers);
 }
 
@@ -246,29 +276,6 @@ void StoreTransitionDescriptor::InitializePlatformIndependent(
                                       machine_types);
 }
 
-void StoreNamedTransitionDescriptor::InitializePlatformIndependent(
-    CallInterfaceDescriptorData* data) {
-  // kReceiver, kFieldOffset, kMap, kValue, kSlot, kVector, kName
-  MachineType machine_types[] = {
-      MachineType::AnyTagged(),    MachineType::TaggedSigned(),
-      MachineType::AnyTagged(),    MachineType::AnyTagged(),
-      MachineType::TaggedSigned(), MachineType::AnyTagged(),
-      MachineType::AnyTagged()};
-  data->InitializePlatformIndependent(arraysize(machine_types), 0,
-                                      machine_types);
-}
-
-void StoreNamedTransitionDescriptor::InitializePlatformSpecific(
-    CallInterfaceDescriptorData* data) {
-  Register registers[] = {
-      ReceiverRegister(), FieldOffsetRegister(), MapRegister(),
-      ValueRegister(),    SlotRegister(),        VectorRegister(),
-      NameRegister(),
-  };
-  int len = arraysize(registers) - kStackArgumentsCount;
-  data->InitializePlatformSpecific(len, registers);
-}
-
 void StringAtDescriptor::InitializePlatformIndependent(
     CallInterfaceDescriptorData* data) {
   // kReceiver, kPosition
@@ -313,31 +320,6 @@ void TypeConversionStackParameterDescriptor::InitializePlatformSpecific(
 void TypeConversionStackParameterDescriptor::InitializePlatformIndependent(
     CallInterfaceDescriptorData* data) {
   data->InitializePlatformIndependent(data->register_param_count(), 1, nullptr);
-}
-
-void MathPowTaggedDescriptor::InitializePlatformSpecific(
-    CallInterfaceDescriptorData* data) {
-  Register registers[] = {exponent()};
-  data->InitializePlatformSpecific(arraysize(registers), registers);
-}
-
-void MathPowIntegerDescriptor::InitializePlatformSpecific(
-    CallInterfaceDescriptorData* data) {
-  Register registers[] = {exponent()};
-  data->InitializePlatformSpecific(arraysize(registers), registers);
-}
-
-const Register LoadFieldDescriptor::ReceiverRegister() {
-  // Reuse the register from the LoadDescriptor, since given the
-  // LoadFieldDescriptor's usage, it doesn't matter exactly which registers are
-  // used to pass parameters in.
-  return LoadDescriptor::ReceiverRegister();
-}
-const Register LoadFieldDescriptor::SmiHandlerRegister() {
-  // Reuse the register from the LoadDescriptor, since given the
-  // LoadFieldDescriptor's usage, it doesn't matter exactly which registers are
-  // used to pass parameters in.
-  return LoadDescriptor::NameRegister();
 }
 
 void LoadWithVectorDescriptor::InitializePlatformIndependent(
@@ -510,45 +492,9 @@ void ConstructStubDescriptor::InitializePlatformIndependent(
                                       machine_types);
 }
 
-void ConstructTrampolineDescriptor::InitializePlatformIndependent(
+void ArrayNoArgumentConstructorDescriptor::InitializePlatformIndependent(
     CallInterfaceDescriptorData* data) {
-  // kFunction, kNewTarget, kActualArgumentsCount
-  MachineType machine_types[] = {
-      MachineType::AnyTagged(), MachineType::AnyTagged(), MachineType::Int32()};
-  data->InitializePlatformIndependent(arraysize(machine_types), 0,
-                                      machine_types);
-}
-
-void BuiltinDescriptor::InitializePlatformIndependent(
-    CallInterfaceDescriptorData* data) {
-  // kTarget, kNewTarget, kArgumentsCount
-  MachineType machine_types[] = {
-      MachineType::AnyTagged(), MachineType::AnyTagged(), MachineType::Int32()};
-  data->InitializePlatformIndependent(arraysize(machine_types), 0,
-                                      machine_types);
-}
-
-void BuiltinDescriptor::InitializePlatformSpecific(
-    CallInterfaceDescriptorData* data) {
-  Register registers[] = {TargetRegister(), NewTargetRegister(),
-                          ArgumentsCountRegister()};
-  data->InitializePlatformSpecific(arraysize(registers), registers);
-}
-
-const Register BuiltinDescriptor::ArgumentsCountRegister() {
-  return kJavaScriptCallArgCountRegister;
-}
-const Register BuiltinDescriptor::NewTargetRegister() {
-  return kJavaScriptCallNewTargetRegister;
-}
-
-const Register BuiltinDescriptor::TargetRegister() {
-  return kJSFunctionRegister;
-}
-
-void ArrayConstructorDescriptor::InitializePlatformIndependent(
-    CallInterfaceDescriptorData* data) {
-  // kTarget, kNewTarget, kActualArgumentsCount, kAllocationSite
+  // kFunction, kAllocationSite, kActualArgumentsCount, kFunctionParameter
   MachineType machine_types[] = {MachineType::AnyTagged(),
                                  MachineType::AnyTagged(), MachineType::Int32(),
                                  MachineType::AnyTagged()};
@@ -556,14 +502,11 @@ void ArrayConstructorDescriptor::InitializePlatformIndependent(
                                       machine_types);
 }
 
-void ArrayNoArgumentConstructorDescriptor::InitializePlatformIndependent(
+void ArrayNoArgumentConstructorDescriptor::InitializePlatformSpecific(
     CallInterfaceDescriptorData* data) {
-  // kFunction, kAllocationSite, kActualArgumentsCount, kFunctionParameter
-  MachineType machine_types[] = {MachineType::TaggedPointer(),
-                                 MachineType::AnyTagged(), MachineType::Int32(),
-                                 MachineType::AnyTagged()};
-  data->InitializePlatformIndependent(arraysize(machine_types), 0,
-                                      machine_types);
+  // This descriptor must use the same set of registers as the
+  // ArrayNArgumentsConstructorDescriptor.
+  ArrayNArgumentsConstructorDescriptor::InitializePlatformSpecific(data);
 }
 
 void ArraySingleArgumentConstructorDescriptor::InitializePlatformIndependent(
@@ -571,10 +514,17 @@ void ArraySingleArgumentConstructorDescriptor::InitializePlatformIndependent(
   // kFunction, kAllocationSite, kActualArgumentsCount, kFunctionParameter,
   // kArraySizeSmiParameter
   MachineType machine_types[] = {
-      MachineType::TaggedPointer(), MachineType::AnyTagged(),
-      MachineType::Int32(), MachineType::AnyTagged(), MachineType::AnyTagged()};
+      MachineType::AnyTagged(), MachineType::AnyTagged(), MachineType::Int32(),
+      MachineType::AnyTagged(), MachineType::AnyTagged()};
   data->InitializePlatformIndependent(arraysize(machine_types), 0,
                                       machine_types);
+}
+
+void ArraySingleArgumentConstructorDescriptor::InitializePlatformSpecific(
+    CallInterfaceDescriptorData* data) {
+  // This descriptor must use the same set of registers as the
+  // ArrayNArgumentsConstructorDescriptor.
+  ArrayNArgumentsConstructorDescriptor::InitializePlatformSpecific(data);
 }
 
 void ArrayNArgumentsConstructorDescriptor::InitializePlatformIndependent(
@@ -584,6 +534,17 @@ void ArrayNArgumentsConstructorDescriptor::InitializePlatformIndependent(
       MachineType::AnyTagged(), MachineType::AnyTagged(), MachineType::Int32()};
   data->InitializePlatformIndependent(arraysize(machine_types), 0,
                                       machine_types);
+}
+
+void ArrayNArgumentsConstructorDescriptor::InitializePlatformSpecific(
+    CallInterfaceDescriptorData* data) {
+  // Keep the arguments on the same registers as they were in
+  // ArrayConstructorDescriptor to avoid unnecessary register moves.
+  // kFunction, kAllocationSite, kActualArgumentsCount
+  Register registers[] = {kJavaScriptCallTargetRegister,
+                          kJavaScriptCallExtraArg1Register,
+                          kJavaScriptCallArgCountRegister};
+  data->InitializePlatformSpecific(arraysize(registers), registers);
 }
 
 void ArgumentAdaptorDescriptor::InitializePlatformIndependent(

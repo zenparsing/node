@@ -289,7 +289,7 @@ void InstructionSelector::VisitLoad(Node* node) {
       g.GetEffectiveAddressMemoryOperand(node, inputs, &input_count);
   InstructionCode code = opcode | AddressingModeField::encode(mode);
   if (node->opcode() == IrOpcode::kPoisonedLoad) {
-    CHECK_EQ(poisoning_enabled_, PoisoningMitigationLevel::kOn);
+    CHECK_NE(poisoning_level_, PoisoningMitigationLevel::kDontPoison);
     code |= MiscField::encode(kMemoryAccessPoisoned);
   }
   Emit(code, 1, outputs, input_count, inputs);
@@ -905,7 +905,7 @@ void InstructionSelector::VisitUint32Mod(Node* node) {
 
 void InstructionSelector::VisitRoundUint32ToFloat32(Node* node) {
   IA32OperandGenerator g(this);
-  InstructionOperand temps[] = {g.TempRegister(), g.TempRegister()};
+  InstructionOperand temps[] = {g.TempRegister()};
   Emit(kSSEUint32ToFloat32, g.DefineAsRegister(node), g.Use(node->InputAt(0)),
        arraysize(temps), temps);
 }
@@ -1244,20 +1244,15 @@ void VisitWordCompare(InstructionSelector* selector, Node* node,
 
 void VisitWordCompare(InstructionSelector* selector, Node* node,
                       FlagsContinuation* cont) {
-  IA32OperandGenerator g(selector);
-  Int32BinopMatcher m(node);
-  if (m.left().IsLoad() && m.right().IsLoadStackPointer()) {
-    LoadMatcher<ExternalReferenceMatcher> mleft(m.left().node());
-    ExternalReference js_stack_limit =
-        ExternalReference::address_of_stack_limit(selector->isolate());
-    if (mleft.object().Is(js_stack_limit) && mleft.index().Is(0)) {
-      // Compare(Load(js_stack_limit), LoadStackPointer)
-      if (!node->op()->HasProperty(Operator::kCommutative)) cont->Commute();
-      InstructionCode opcode = cont->Encode(kIA32StackCheck);
-      CHECK(cont->IsBranch());
-      selector->EmitWithContinuation(opcode, cont);
-      return;
-    }
+  StackCheckMatcher<Int32BinopMatcher, IrOpcode::kUint32LessThan> m(
+      selector->isolate(), node);
+  if (m.Matched()) {
+    // Compare(Load(js_stack_limit), LoadStackPointer)
+    if (!node->op()->HasProperty(Operator::kCommutative)) cont->Commute();
+    InstructionCode opcode = cont->Encode(kIA32StackCheck);
+    CHECK(cont->IsBranch());
+    selector->EmitWithContinuation(opcode, cont);
+    return;
   }
   VisitWordCompare(selector, node, kIA32Cmp, cont);
 }
@@ -1665,7 +1660,7 @@ void InstructionSelector::VisitWord32AtomicCompareExchange(Node* node) {
   Emit(code, 1, outputs, input_count, inputs);
 }
 
-void InstructionSelector::VisitAtomicBinaryOperation(
+void InstructionSelector::VisitWord32AtomicBinaryOperation(
     Node* node, ArchOpcode int8_op, ArchOpcode uint8_op, ArchOpcode int16_op,
     ArchOpcode uint16_op, ArchOpcode word32_op) {
   IA32OperandGenerator g(this);
@@ -1715,7 +1710,7 @@ void InstructionSelector::VisitAtomicBinaryOperation(
 
 #define VISIT_ATOMIC_BINOP(op)                                   \
   void InstructionSelector::VisitWord32Atomic##op(Node* node) {  \
-    VisitAtomicBinaryOperation(                                  \
+    VisitWord32AtomicBinaryOperation(                            \
         node, kWord32Atomic##op##Int8, kWord32Atomic##op##Uint8, \
         kWord32Atomic##op##Int16, kWord32Atomic##op##Uint16,     \
         kWord32Atomic##op##Word32);                              \
@@ -1757,6 +1752,7 @@ VISIT_ATOMIC_BINOP(Xor)
   V(I32x4MaxU)             \
   V(I32x4GtU)              \
   V(I32x4GeU)              \
+  V(I16x8SConvertI32x4)    \
   V(I16x8Add)              \
   V(I16x8AddSaturateS)     \
   V(I16x8AddHoriz)         \
@@ -1769,12 +1765,14 @@ VISIT_ATOMIC_BINOP(Xor)
   V(I16x8Ne)               \
   V(I16x8GtS)              \
   V(I16x8GeS)              \
+  V(I16x8UConvertI32x4)    \
   V(I16x8AddSaturateU)     \
   V(I16x8SubSaturateU)     \
   V(I16x8MinU)             \
   V(I16x8MaxU)             \
   V(I16x8GtU)              \
   V(I16x8GeU)              \
+  V(I8x16SConvertI16x8)    \
   V(I8x16Add)              \
   V(I8x16AddSaturateS)     \
   V(I8x16Sub)              \
@@ -1785,6 +1783,7 @@ VISIT_ATOMIC_BINOP(Xor)
   V(I8x16Ne)               \
   V(I8x16GtS)              \
   V(I8x16GeS)              \
+  V(I8x16UConvertI16x8)    \
   V(I8x16AddSaturateU)     \
   V(I8x16SubSaturateU)     \
   V(I8x16MinU)             \
@@ -1807,6 +1806,16 @@ VISIT_ATOMIC_BINOP(Xor)
   V(F32x4Abs)                    \
   V(F32x4Neg)                    \
   V(S128Not)
+
+#define SIMD_ANYTRUE_LIST(V) \
+  V(S1x4AnyTrue)             \
+  V(S1x8AnyTrue)             \
+  V(S1x16AnyTrue)
+
+#define SIMD_ALLTRUE_LIST(V) \
+  V(S1x4AllTrue)             \
+  V(S1x8AllTrue)             \
+  V(S1x16AllTrue)
 
 #define SIMD_SHIFT_OPCODES(V) \
   V(I32x4Shl)                 \
@@ -1967,6 +1976,28 @@ SIMD_UNOP_PREFIX_LIST(VISIT_SIMD_UNOP_PREFIX)
 #undef VISIT_SIMD_UNOP_PREFIX
 #undef SIMD_UNOP_PREFIX_LIST
 
+#define VISIT_SIMD_ANYTRUE(Opcode)                                  \
+  void InstructionSelector::Visit##Opcode(Node* node) {             \
+    IA32OperandGenerator g(this);                                   \
+    InstructionOperand temps[] = {g.TempRegister()};                \
+    Emit(kIA32##Opcode, g.DefineAsRegister(node),                   \
+         g.UseRegister(node->InputAt(0)), arraysize(temps), temps); \
+  }
+SIMD_ANYTRUE_LIST(VISIT_SIMD_ANYTRUE)
+#undef VISIT_SIMD_ANYTRUE
+#undef SIMD_ANYTRUE_LIST
+
+#define VISIT_SIMD_ALLTRUE(Opcode)                                         \
+  void InstructionSelector::Visit##Opcode(Node* node) {                    \
+    IA32OperandGenerator g(this);                                          \
+    InstructionOperand temps[] = {g.TempRegister()};                       \
+    Emit(kIA32##Opcode, g.DefineAsRegister(node), g.Use(node->InputAt(0)), \
+         arraysize(temps), temps);                                         \
+  }
+SIMD_ALLTRUE_LIST(VISIT_SIMD_ALLTRUE)
+#undef VISIT_SIMD_ALLTRUE
+#undef SIMD_ALLTRUE_LIST
+
 #define VISIT_SIMD_BINOP(Opcode)                           \
   void InstructionSelector::Visit##Opcode(Node* node) {    \
     VisitRROFloat(this, node, kAVX##Opcode, kSSE##Opcode); \
@@ -1983,41 +2014,150 @@ void InstructionSelector::VisitInt64AbsWithOverflow(Node* node) {
   UNREACHABLE();
 }
 
-void InstructionSelector::VisitS8x16Shuffle(Node* node) {
-  static const int kMaxSwizzleIndex = 15;
-  static const int kMaxShuffleIndex = 31;
-  const uint8_t* shuffle = OpParameter<uint8_t*>(node->op());
-  uint8_t mask = CanonicalizeShuffle(node);
-  uint8_t shuffle32x4[4];
-  IA32OperandGenerator g(this);
-  InstructionOperand output = g.DefineAsRegister(node);
-  InstructionOperand inputs[6];
-  InstructionOperand temps[1];
-  size_t input_count = 0;
-  Node* input0 = node->InputAt(0);
-  Node* input1 = node->InputAt(1);
-  if (mask == kMaxSwizzleIndex) {
-    if (TryMatch32x4Shuffle(shuffle, shuffle32x4)) {
-      Emit(kIA32S32x4Swizzle, output, g.Use(input0),
-           g.UseImmediate((shuffle32x4[0] & 3) | ((shuffle32x4[1] & 3) << 2) |
-                          ((shuffle32x4[2] & 3) << 4) |
-                          ((shuffle32x4[3] & 3) << 6)));
-      return;
-    }
-    // TODO(ia32): handle non 32x4 swizzles here
-    inputs[input_count++] = g.Use(input0);
-  } else {
-    DCHECK_EQ(kMaxShuffleIndex, mask);
-    USE(kMaxShuffleIndex);
-    inputs[input_count++] = g.Use(input0);
-    inputs[input_count++] = g.Use(input1);
+namespace {
+
+// Packs a 4 lane shuffle into a single imm8 suitable for use by pshufd,
+// pshuflw, and pshufhw.
+uint8_t PackShuffle4(uint8_t* shuffle) {
+  return (shuffle[0] & 3) | ((shuffle[1] & 3) << 2) | ((shuffle[2] & 3) << 4) |
+         ((shuffle[3] & 3) << 6);
+}
+
+// Gets an 8 bit lane mask suitable for 16x8 pblendw.
+uint8_t PackBlend8(const uint8_t* shuffle16x8) {
+  int8_t result = 0;
+  for (int i = 0; i < 8; ++i) {
+    result |= (shuffle16x8[i] >= 8 ? 1 : 0) << i;
   }
-  inputs[input_count++] = g.UseImmediate(Pack4Lanes(shuffle, mask));
-  inputs[input_count++] = g.UseImmediate(Pack4Lanes(shuffle + 4, mask));
-  inputs[input_count++] = g.UseImmediate(Pack4Lanes(shuffle + 8, mask));
-  inputs[input_count++] = g.UseImmediate(Pack4Lanes(shuffle + 12, mask));
-  temps[0] = g.TempRegister();
-  Emit(kIA32S8x16Shuffle, 1, &output, input_count, inputs, 1, temps);
+  return result;
+}
+
+// Gets an 8 bit lane mask suitable for 32x4 pblendw.
+uint8_t PackBlend4(const uint8_t* shuffle32x4) {
+  int8_t result = 0;
+  for (int i = 0; i < 4; ++i) {
+    result |= (shuffle32x4[i] >= 4 ? 0x3 : 0) << (i * 2);
+  }
+  return result;
+}
+
+// Returns true if shuffle can be separated into two half shuffles, i.e.lanes
+// don't move from low 4 lanes to high 4 lanes or vice versa) and a blend.
+// E.g. [3 2 1 0 15 14 13 12].
+bool Is16x8BlendedShuffle(uint8_t* shuffle16x8, uint8_t* blend_mask) {
+  *blend_mask = 0;
+  for (int i = 0; i < 8; i++) {
+    *blend_mask |= (shuffle16x8[i] > 7 ? 1 : 0) << i;
+    if ((shuffle16x8[i] & 0x4) != (i & 0x4)) return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+// TODO(bbudge) Make sure identity shuffle emits no instructions.
+void InstructionSelector::VisitS8x16Shuffle(Node* node) {
+  uint8_t shuffle[kSimd128Size];
+  bool is_swizzle;
+  CanonicalizeShuffle(node, shuffle, &is_swizzle);
+
+  int imm_count = 0;
+  static const int kMaxImms = 6;
+  uint32_t imms[kMaxImms];
+  int temp_count = 0;
+  static const int kMaxTemps = 2;
+  InstructionOperand temps[kMaxTemps];
+
+  IA32OperandGenerator g(this);
+  bool use_avx = CpuFeatures::IsSupported(AVX);
+  // AVX and swizzles don't generally need DefineSameAsFirst to avoid a move.
+  bool no_same_as_first = use_avx || is_swizzle;
+  // We generally need UseRegister for the first source.
+  bool no_use_register = false;
+  ArchOpcode opcode = kIA32S8x16Shuffle;  // general shuffle is the default
+
+  uint8_t offset;
+  uint8_t shuffle32x4[4];
+  uint8_t shuffle16x8[8];
+  if (TryMatchConcat(shuffle, &offset)) {
+    // Swap inputs from the normal order for (v)palignr.
+    SwapShuffleInputs(node);
+    is_swizzle = false;  // It's simpler to just handle the general case.
+    no_same_as_first = use_avx;  // SSE requires same-as-first.
+    opcode = use_avx ? kAVXS8x16Alignr : kSSES8x16Alignr;
+    // palignr takes a single imm8 offset.
+    imms[imm_count++] = offset;
+  } else if (TryMatch32x4Shuffle(shuffle, shuffle32x4)) {
+    uint8_t shuffle_mask = PackShuffle4(shuffle32x4);
+    if (is_swizzle) {
+      // pshufd takes a single imm8 shuffle mask.
+      opcode = kIA32S32x4Swizzle;
+      no_same_as_first = true;
+      no_use_register = true;
+      imms[imm_count++] = shuffle_mask;
+    } else {
+      // 2 operand shuffle
+      // A blend is more efficient than a general 32x4 shuffle; try it first.
+      if (TryMatchBlend(shuffle)) {
+        opcode = use_avx ? kAVXS16x8Blend : kSSES16x8Blend;
+        uint8_t blend_mask = PackBlend4(shuffle32x4);
+        imms[imm_count++] = blend_mask;
+      } else {
+        opcode = kIA32S32x4Shuffle;
+        no_same_as_first = true;
+        no_use_register = true;
+        imms[imm_count++] = shuffle_mask;
+        int8_t blend_mask = PackBlend4(shuffle32x4);
+        imms[imm_count++] = blend_mask;
+      }
+    }
+  } else if (TryMatch16x8Shuffle(shuffle, shuffle16x8)) {
+    uint8_t blend_mask;
+    if (TryMatchBlend(shuffle)) {
+      opcode = use_avx ? kAVXS16x8Blend : kSSES16x8Blend;
+      blend_mask = PackBlend8(shuffle16x8);
+      imms[imm_count++] = blend_mask;
+    } else if (Is16x8BlendedShuffle(shuffle16x8, &blend_mask)) {
+      opcode = is_swizzle ? kIA32S16x8HalfShuffle1 : kIA32S16x8HalfShuffle2;
+      // Half-shuffles don't need DefineSameAsFirst or UseRegister(src0).
+      no_same_as_first = true;
+      no_use_register = true;
+      uint8_t mask_lo = PackShuffle4(shuffle16x8);
+      uint8_t mask_hi = PackShuffle4(shuffle16x8 + 4);
+      imms[imm_count++] = mask_lo;
+      imms[imm_count++] = mask_hi;
+      if (!is_swizzle) imms[imm_count++] = blend_mask;
+    }
+  }
+  if (opcode == kIA32S8x16Shuffle) {
+    // Use same-as-first for general swizzle, but not shuffle.
+    no_same_as_first = !is_swizzle;
+    no_use_register = no_same_as_first;
+    imms[imm_count++] = Pack4Lanes(shuffle);
+    imms[imm_count++] = Pack4Lanes(shuffle + 4);
+    imms[imm_count++] = Pack4Lanes(shuffle + 8);
+    imms[imm_count++] = Pack4Lanes(shuffle + 12);
+    temps[temp_count++] = g.TempRegister();
+  }
+
+  // Use DefineAsRegister(node) and Use(src0) if we can without forcing an extra
+  // move instruction in the CodeGenerator.
+  Node* input0 = node->InputAt(0);
+  InstructionOperand dst =
+      no_same_as_first ? g.DefineAsRegister(node) : g.DefineSameAsFirst(node);
+  InstructionOperand src0 =
+      no_use_register ? g.Use(input0) : g.UseRegister(input0);
+
+  int input_count = 0;
+  InstructionOperand inputs[2 + kMaxImms + kMaxTemps];
+  inputs[input_count++] = src0;
+  if (!is_swizzle) {
+    inputs[input_count++] = g.Use(node->InputAt(1));
+  }
+  for (int i = 0; i < imm_count; ++i) {
+    inputs[input_count++] = g.UseImmediate(imms[i]);
+  }
+  Emit(opcode, 1, &dst, input_count, inputs, temp_count, temps);
 }
 
 // static

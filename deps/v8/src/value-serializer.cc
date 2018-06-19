@@ -15,6 +15,9 @@
 #include "src/heap/factory.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
+#include "src/objects/js-collection-inl.h"
+#include "src/objects/js-regexp-inl.h"
+#include "src/objects/ordered-hash-table-inl.h"
 #include "src/snapshot/code-serializer.h"
 #include "src/transitions.h"
 #include "src/wasm/wasm-engine.h"
@@ -525,7 +528,7 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(Handle<JSReceiver> receiver) {
 }
 
 Maybe<bool> ValueSerializer::WriteJSObject(Handle<JSObject> object) {
-  DCHECK_GT(object->map()->instance_type(), LAST_CUSTOM_ELEMENTS_RECEIVER);
+  DCHECK(!object->map()->IsCustomElementsReceiverMap());
   const bool can_serialize_fast =
       object->HasFastProperties() && object->elements()->length() == 0;
   if (!can_serialize_fast) return WriteJSObjectSlow(object);
@@ -872,12 +875,11 @@ Maybe<bool> ValueSerializer::WriteWasmModule(Handle<WasmModuleObject> object) {
     }
   }
 
-  Handle<WasmCompiledModule> compiled_part(object->compiled_module(), isolate_);
   WasmEncodingTag encoding_tag = WasmEncodingTag::kRawBytes;
   WriteTag(SerializationTag::kWasmModule);
   WriteRawBytes(&encoding_tag, sizeof(encoding_tag));
 
-  Handle<String> wire_bytes(compiled_part->shared()->module_bytes(), isolate_);
+  Handle<String> wire_bytes(object->module_bytes(), isolate_);
   int wire_bytes_length = wire_bytes->length();
   WriteVarint<uint32_t>(wire_bytes_length);
   uint8_t* destination;
@@ -885,10 +887,19 @@ Maybe<bool> ValueSerializer::WriteWasmModule(Handle<WasmModuleObject> object) {
     String::WriteToFlat(*wire_bytes, destination, 0, wire_bytes_length);
   }
 
-  std::pair<std::unique_ptr<const byte[]>, size_t> serialized_module =
-      wasm::SerializeNativeModule(isolate_, compiled_part);
-  WriteVarint<uint32_t>(static_cast<uint32_t>(serialized_module.second));
-  WriteRawBytes(serialized_module.first.get(), serialized_module.second);
+  wasm::NativeModule* native_module =
+      object->compiled_module()->GetNativeModule();
+  size_t module_size =
+      wasm::GetSerializedNativeModuleSize(isolate_, native_module);
+  CHECK_GE(std::numeric_limits<uint32_t>::max(), module_size);
+  WriteVarint<uint32_t>(static_cast<uint32_t>(module_size));
+  uint8_t* module_buffer;
+  if (ReserveRawBytes(module_size).To(&module_buffer)) {
+    if (!wasm::SerializeNativeModule(isolate_, native_module,
+                                     {module_buffer, module_size})) {
+      return Nothing<bool>();
+    }
+  }
   return ThrowIfOutOfMemory();
 }
 
@@ -1785,12 +1796,8 @@ MaybeHandle<JSObject> ValueDeserializer::ReadWasmModule() {
   }
 
   // Try to deserialize the compiled module first.
-  Handle<WasmCompiledModule> compiled_module;
-  MaybeHandle<JSObject> result;
-  if (wasm::DeserializeNativeModule(isolate_, compiled_bytes, wire_bytes)
-          .ToHandle(&compiled_module)) {
-    result = WasmModuleObject::New(isolate_, compiled_module);
-  }
+  MaybeHandle<WasmModuleObject> result =
+      wasm::DeserializeNativeModule(isolate_, compiled_bytes, wire_bytes);
   if (result.is_null()) {
     wasm::ErrorThrower thrower(isolate_, "ValueDeserializer::ReadWasmModule");
     result = isolate_->wasm_engine()->SyncCompile(
@@ -1898,7 +1905,7 @@ Maybe<uint32_t> ValueDeserializer::ReadJSObjectProperties(
       // transition was found.
       Handle<Object> key;
       Handle<Map> target;
-      TransitionsAccessor transitions(map);
+      TransitionsAccessor transitions(isolate_, map);
       Handle<String> expected_key = transitions.ExpectedTransitionKey();
       if (!expected_key.is_null() && ReadExpectedString(expected_key)) {
         key = expected_key;
@@ -1911,7 +1918,7 @@ Maybe<uint32_t> ValueDeserializer::ReadJSObjectProperties(
           key =
               isolate_->factory()->InternalizeString(Handle<String>::cast(key));
           // Don't reuse |transitions| because it could be stale.
-          transitioning = TransitionsAccessor(map)
+          transitioning = TransitionsAccessor(isolate_, map)
                               .FindTransitionToField(Handle<String>::cast(key))
                               .ToHandle(&target);
         } else {

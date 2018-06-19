@@ -95,9 +95,6 @@ class JSWeakCollection : public JSObject {
   // [table]: the backing hash table mapping keys to values.
   DECL_ACCESSORS(table, Object)
 
-  // [next]: linked list of encountered weak maps during GC.
-  DECL_ACCESSORS(next, Object)
-
   static void Initialize(Handle<JSWeakCollection> collection, Isolate* isolate);
   static void Set(Handle<JSWeakCollection> collection, Handle<Object> key,
                   Handle<Object> value, int32_t hash);
@@ -107,22 +104,16 @@ class JSWeakCollection : public JSObject {
                                     int max_entries);
 
   static const int kTableOffset = JSObject::kHeaderSize;
-  static const int kNextOffset = kTableOffset + kPointerSize;
-  static const int kSize = kNextOffset + kPointerSize;
-
-  // Visiting policy defines whether the table and next collection fields
-  // should be visited or not.
-  enum BodyVisitingPolicy { kIgnoreWeakness, kRespectWeakness };
+  static const int kSize = kTableOffset + kPointerSize;
 
   // Iterates the function object according to the visiting policy.
-  template <BodyVisitingPolicy>
   class BodyDescriptorImpl;
 
   // Visit the whole object.
-  typedef BodyDescriptorImpl<kIgnoreWeakness> BodyDescriptor;
+  typedef BodyDescriptorImpl BodyDescriptor;
 
-  // Don't visit table and next collection fields.
-  typedef BodyDescriptorImpl<kRespectWeakness> BodyDescriptorWeak;
+  // No weak fields.
+  typedef BodyDescriptor BodyDescriptorWeak;
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(JSWeakCollection);

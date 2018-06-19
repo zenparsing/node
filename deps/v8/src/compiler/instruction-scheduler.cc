@@ -248,7 +248,6 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
     case kArchNop:
     case kArchFramePointer:
     case kArchParentFramePointer:
-    case kArchRootsPointer:
     case kArchStackSlot:  // Despite its name this opcode will produce a
                           // reference to a frame slot, so it is not affected
                           // by the arm64 dual stack issues mentioned below.
@@ -290,7 +289,7 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
       // must not be reordered with instruction with side effects.
       return kIsLoadOperation;
 
-    case kArchPoisonOnSpeculationWord:
+    case kArchWordPoisonOnSpeculation:
       // While poisoning operations have no side effect, they must not be
       // reordered relative to branches.
       return kHasSideEffect;

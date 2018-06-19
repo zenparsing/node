@@ -10,6 +10,7 @@
 #include "src/wasm/wasm-engine.h"
 #include "src/wasm/wasm-module-builder.h"
 #include "src/wasm/wasm-module.h"
+#include "src/wasm/wasm-objects.h"
 #include "src/zone/accounting-allocator.h"
 #include "src/zone/zone.h"
 #include "test/common/wasm/flag-utils.h"
@@ -58,8 +59,8 @@ int FuzzWasmSection(SectionCode section, const uint8_t* data, size_t size) {
 
   ErrorThrower thrower(i_isolate, "decoder");
 
-  std::unique_ptr<const WasmModule> module(testing::DecodeWasmModuleForTesting(
-      i_isolate, &thrower, buffer.begin(), buffer.end(), kWasmOrigin));
+  testing::DecodeWasmModuleForTesting(i_isolate, &thrower, buffer.begin(),
+                                      buffer.end(), kWasmOrigin);
 
   return 0;
 }
@@ -154,7 +155,7 @@ void GenerateTestCase(Isolate* isolate, ModuleWireBytes wire_bytes,
   WasmModule* module = module_res.val.get();
   CHECK_NOT_NULL(module);
 
-  OFStream os(stdout);
+  StdoutStream os;
 
   os << "// Copyright 2018 the V8 project authors. All rights reserved.\n"
         "// Use of this source code is governed by a BSD-style license that "
@@ -205,7 +206,7 @@ void GenerateTestCase(Isolate* isolate, ModuleWireBytes wire_bytes,
         ValueType type = decls.type_list[pos];
         while (pos + count < locals && decls.type_list[pos + count] == type)
           ++count;
-        os << ".addLocals({" << WasmOpcodes::TypeName(type)
+        os << ".addLocals({" << ValueTypes::TypeName(type)
            << "_count: " << count << "})";
       }
       os << "\n";

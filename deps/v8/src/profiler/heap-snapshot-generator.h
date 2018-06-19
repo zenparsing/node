@@ -13,6 +13,7 @@
 #include "src/base/platform/time.h"
 #include "src/objects.h"
 #include "src/objects/fixed-array.h"
+#include "src/objects/hash-table.h"
 #include "src/profiler/strings-storage.h"
 #include "src/string-hasher.h"
 #include "src/visitors.h"
@@ -265,6 +266,7 @@ class HeapObjectsMap {
   };
 
   SnapshotObjectId next_id_;
+  // TODO(jkummerow): Use a map that uses {Address} as the key type.
   base::HashMap entries_map_;
   std::vector<EntryInfo> entries_;
   std::vector<TimeInterval> time_intervals_;
@@ -340,7 +342,7 @@ class V8HeapExplorer : public HeapEntriesAllocator {
                  v8::HeapProfiler::ObjectNameResolver* resolver);
   virtual ~V8HeapExplorer();
   virtual HeapEntry* AllocateEntry(HeapThing ptr);
-  int EstimateObjectsCount(HeapIterator* iterator);
+  int EstimateObjectsCount();
   bool IterateAndExtractReferences(SnapshotFiller* filler);
   void TagGlobalObjects();
   void TagCodeObject(Code* code);
@@ -353,9 +355,6 @@ class V8HeapExplorer : public HeapEntriesAllocator {
   static String* GetConstructorName(JSObject* object);
 
  private:
-  typedef bool (V8HeapExplorer::*ExtractReferencesMethod)(int entry,
-                                                          HeapObject* object);
-
   void MarkVisitedField(int offset);
 
   HeapEntry* AddEntry(HeapObject* object);
@@ -365,11 +364,7 @@ class V8HeapExplorer : public HeapEntriesAllocator {
 
   const char* GetSystemEntryName(HeapObject* object);
 
-  template<V8HeapExplorer::ExtractReferencesMethod extractor>
-  bool IterateAndExtractSinglePass();
-
-  bool ExtractReferencesPass1(int entry, HeapObject* obj);
-  bool ExtractReferencesPass2(int entry, HeapObject* obj);
+  void ExtractReferences(int entry, HeapObject* obj);
   void ExtractJSGlobalProxyReferences(int entry, JSGlobalProxy* proxy);
   void ExtractJSObjectReferences(int entry, JSObject* js_obj);
   void ExtractStringReferences(int entry, String* obj);
@@ -377,6 +372,8 @@ class V8HeapExplorer : public HeapEntriesAllocator {
   void ExtractJSCollectionReferences(int entry, JSCollection* collection);
   void ExtractJSWeakCollectionReferences(int entry,
                                          JSWeakCollection* collection);
+  void ExtractEphemeronHashTableReferences(int entry,
+                                           EphemeronHashTable* table);
   void ExtractContextReferences(int entry, Context* context);
   void ExtractMapReferences(int entry, Map* map);
   void ExtractSharedFunctionInfoReferences(int entry,
@@ -395,7 +392,8 @@ class V8HeapExplorer : public HeapEntriesAllocator {
   void ExtractFixedArrayReferences(int entry, FixedArray* array);
   void ExtractFeedbackVectorReferences(int entry,
                                        FeedbackVector* feedback_vector);
-  void ExtractWeakFixedArrayReferences(int entry, WeakFixedArray* array);
+  template <typename T>
+  void ExtractWeakArrayReferences(int header_size, int entry, T* array);
   void ExtractPropertyReferences(JSObject* js_obj, int entry);
   void ExtractAccessorPairProperty(JSObject* js_obj, int entry, Name* key,
                                    Object* callback_obj, int field_offset = -1);
@@ -456,8 +454,6 @@ class V8HeapExplorer : public HeapEntriesAllocator {
                              Object* child);
   const char* GetStrongGcSubrootName(Object* object);
   void TagObject(Object* obj, const char* tag);
-  void TagFixedArraySubType(const FixedArray* array,
-                            FixedArraySubInstanceType type);
 
   HeapEntry* GetEntry(Object* obj);
 
@@ -470,7 +466,6 @@ class V8HeapExplorer : public HeapEntriesAllocator {
   HeapObjectsSet objects_tags_;
   HeapObjectsSet strong_gc_subroot_names_;
   HeapObjectsSet user_roots_;
-  std::unordered_map<const FixedArray*, FixedArraySubInstanceType> array_types_;
   v8::HeapProfiler::ObjectNameResolver* global_object_name_resolver_;
 
   std::vector<bool> visited_fields_;
@@ -505,18 +500,17 @@ class NativeObjectsExplorer {
                                       v8::RetainedObjectInfo* info);
   void VisitSubtreeWrapper(Object** p, uint16_t class_id);
 
-  static uint32_t InfoHash(v8::RetainedObjectInfo* info) {
-    return ComputeIntegerHash(static_cast<uint32_t>(info->GetHash()));
-  }
-  static bool RetainedInfosMatch(void* key1, void* key2) {
-    return key1 == key2 ||
-        (reinterpret_cast<v8::RetainedObjectInfo*>(key1))->IsEquivalent(
-            reinterpret_cast<v8::RetainedObjectInfo*>(key2));
-  }
-  INLINE(static bool StringsMatch(void* key1, void* key2)) {
-    return strcmp(reinterpret_cast<char*>(key1),
-                  reinterpret_cast<char*>(key2)) == 0;
-  }
+  struct RetainedInfoHasher {
+    std::size_t operator()(v8::RetainedObjectInfo* info) const {
+      return ComputeIntegerHash(static_cast<uint32_t>(info->GetHash()));
+    }
+  };
+  struct RetainedInfoEquals {
+    bool operator()(v8::RetainedObjectInfo* info1,
+                    v8::RetainedObjectInfo* info2) const {
+      return info1 == info2 || info1->IsEquivalent(info2);
+    }
+  };
 
   NativeGroupRetainedObjectInfo* FindOrAddGroupInfo(const char* label);
 
@@ -527,9 +521,12 @@ class NativeObjectsExplorer {
   StringsStorage* names_;
   bool embedder_queried_;
   HeapObjectsSet in_groups_;
-  // RetainedObjectInfo* -> std::vector<HeapObject*>*
-  base::CustomMatcherHashMap objects_by_info_;
-  base::CustomMatcherHashMap native_groups_;
+  std::unordered_map<v8::RetainedObjectInfo*, std::vector<HeapObject*>*,
+                     RetainedInfoHasher, RetainedInfoEquals>
+      objects_by_info_;
+  std::unordered_map<const char*, NativeGroupRetainedObjectInfo*,
+                     SeededStringHasher, StringEquals>
+      native_groups_;
   std::unique_ptr<HeapEntriesAllocator> synthetic_entries_allocator_;
   std::unique_ptr<HeapEntriesAllocator> native_entries_allocator_;
   std::unique_ptr<HeapEntriesAllocator> embedder_graph_entries_allocator_;
@@ -557,7 +554,7 @@ class HeapSnapshotGenerator : public SnapshottingProgressReportingInterface {
   bool FillReferences();
   void ProgressStep();
   bool ProgressReport(bool force = false);
-  void SetProgressTotal(int iterations_count);
+  void InitProgressCounter();
 
   HeapSnapshot* snapshot_;
   v8::ActivityControl* control_;

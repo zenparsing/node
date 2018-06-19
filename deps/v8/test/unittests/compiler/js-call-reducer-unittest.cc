@@ -21,7 +21,10 @@ namespace compiler {
 class JSCallReducerTest : public TypedGraphTest {
  public:
   JSCallReducerTest()
-      : TypedGraphTest(3), javascript_(zone()), deps_(isolate(), zone()) {}
+      : TypedGraphTest(3),
+        javascript_(zone()),
+        deps_(isolate(), zone()),
+        js_heap_broker(isolate()) {}
   ~JSCallReducerTest() override {}
 
  protected:
@@ -33,8 +36,8 @@ class JSCallReducerTest : public TypedGraphTest {
     // TODO(titzer): mock the GraphReducer here for better unit testing.
     GraphReducer graph_reducer(zone(), graph());
 
-    JSCallReducer reducer(&graph_reducer, &jsgraph, JSCallReducer::kNoFlags,
-                          native_context(), &deps_);
+    JSCallReducer reducer(&graph_reducer, &jsgraph, &js_heap_broker,
+                          JSCallReducer::kNoFlags, native_context(), &deps_);
     return reducer.Reduce(node);
   }
 
@@ -52,6 +55,15 @@ class JSCallReducerTest : public TypedGraphTest {
     TypedGraphTest::TearDownTestCase();
     i::FLAG_lazy_deserialization = old_flag_lazy_;
     i::FLAG_lazy_handler_deserialization = old_flag_lazy_handler_;
+  }
+
+  Node* GlobalFunction(const char* name) {
+    Handle<JSFunction> f = Handle<JSFunction>::cast(
+        Object::GetProperty(
+            isolate()->global_object(),
+            isolate()->factory()->NewStringFromAsciiChecked(name))
+            .ToHandleChecked());
+    return HeapConstant(f);
   }
 
   Node* MathFunction(const std::string& name) {
@@ -120,6 +132,7 @@ class JSCallReducerTest : public TypedGraphTest {
  private:
   JSOperatorBuilder javascript_;
   CompilationDependencies deps_;
+  JSHeapBroker js_heap_broker;
 
   static bool old_flag_lazy_;
   static bool old_flag_lazy_handler_;
@@ -533,6 +546,64 @@ TEST_F(JSCallReducerTest, NumberIsSafeIntegerWithIntegral32) {
 
   ASSERT_TRUE(r.Changed());
   EXPECT_THAT(r.replacement(), IsObjectIsSafeInteger(p0));
+}
+
+// -----------------------------------------------------------------------------
+// isFinite
+
+TEST_F(JSCallReducerTest, GlobalIsFiniteWithNumber) {
+  Node* function = GlobalFunction("isFinite");
+
+  Node* effect = graph()->start();
+  Node* control = graph()->start();
+  Node* context = UndefinedConstant();
+  Node* frame_state = graph()->start();
+  Node* p0 = Parameter(Type::Any(), 0);
+  Node* call = graph()->NewNode(Call(3), function, UndefinedConstant(), p0,
+                                context, frame_state, effect, control);
+  Reduction r = Reduce(call);
+
+  ASSERT_TRUE(r.Changed());
+  EXPECT_THAT(r.replacement(), IsNumberIsFinite(IsSpeculativeToNumber(p0)));
+}
+
+// -----------------------------------------------------------------------------
+// isNaN
+
+TEST_F(JSCallReducerTest, GlobalIsNaN) {
+  Node* function = GlobalFunction("isNaN");
+
+  Node* effect = graph()->start();
+  Node* control = graph()->start();
+  Node* context = UndefinedConstant();
+  Node* frame_state = graph()->start();
+  Node* p0 = Parameter(Type::Any(), 0);
+  Node* call = graph()->NewNode(Call(3), function, UndefinedConstant(), p0,
+                                context, frame_state, effect, control);
+  Reduction r = Reduce(call);
+
+  ASSERT_TRUE(r.Changed());
+  EXPECT_THAT(r.replacement(), IsNumberIsNaN(IsSpeculativeToNumber(p0)));
+}
+
+// -----------------------------------------------------------------------------
+// Number.parseInt
+
+TEST_F(JSCallReducerTest, NumberParseInt) {
+  Node* function = NumberFunction("parseInt");
+
+  Node* effect = graph()->start();
+  Node* control = graph()->start();
+  Node* context = UndefinedConstant();
+  Node* frame_state = graph()->start();
+  Node* p0 = Parameter(Type::Any(), 0);
+  Node* p1 = Parameter(Type::Any(), 1);
+  Node* call = graph()->NewNode(Call(4), function, UndefinedConstant(), p0, p1,
+                                context, frame_state, effect, control);
+  Reduction r = Reduce(call);
+
+  ASSERT_TRUE(r.Changed());
+  EXPECT_THAT(r.replacement(), IsJSParseInt(p0, p1));
 }
 
 }  // namespace compiler

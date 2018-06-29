@@ -74,11 +74,17 @@ struct HasMain {
   enum Bool { Yes, No };
 };
 
+struct HasModule {
+  enum Bool { Yes, No };
+};
+
 struct PackageConfig {
   const Exists::Bool exists;
   const IsValid::Bool is_valid;
   const HasMain::Bool has_main;
+  const HasModule::Bool has_module;
   const std::string main;
+  const std::string module;
 };
 }  // namespace loader
 
@@ -194,6 +200,7 @@ struct PackageConfig {
   V(kill_signal_string, "killSignal")                                         \
   V(mac_string, "mac")                                                        \
   V(main_string, "main")                                                      \
+  V(module_string, "module")                                                  \
   V(max_buffer_string, "maxBuffer")                                           \
   V(max_semi_space_size_string, "maxSemiSpaceSize")                           \
   V(max_old_space_size_string, "maxOldSpaceSize")                             \

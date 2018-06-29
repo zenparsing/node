@@ -13,13 +13,18 @@ namespace node {
 namespace loader {
 
 enum PackageMainCheck : bool {
-    CheckMain = true,
-    IgnoreMain = false
+  CheckMain = true,
+  IgnoreMain = false
+};
+
+struct Importing {
+  enum Bool { Yes, No };
 };
 
 v8::Maybe<url::URL> Resolve(Environment* env,
                             const std::string& specifier,
                             const url::URL& base,
+                            Importing::Bool importing,
                             PackageMainCheck read_pkg_json = CheckMain);
 
 class ModuleWrap : public BaseObject {

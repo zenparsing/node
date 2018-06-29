@@ -74,17 +74,11 @@ struct HasMain {
   enum Bool { Yes, No };
 };
 
-struct HasModule {
-  enum Bool { Yes, No };
-};
-
 struct PackageConfig {
   const Exists::Bool exists;
   const IsValid::Bool is_valid;
   const HasMain::Bool has_main;
-  const HasModule::Bool has_module;
   const std::string main;
-  const std::string module;
 };
 }  // namespace loader
 

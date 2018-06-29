@@ -207,6 +207,11 @@ extern bool config_experimental_repl_await;
 // that is used by lib/internal/bootstrap/node.js
 extern std::string config_userland_loader;
 
+// Set in node.cc by ParseArgs when --module is used.
+// Used in node_config.cc to set a constant on process.binding('config')
+// that is used by lib/module.js
+extern bool config_module_entry_point;
+
 // Set in node.cc by ParseArgs when --expose-internals or --expose_internals is
 // used.
 // Used in node_config.cc to set a constant on process.binding('config')

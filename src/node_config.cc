@@ -88,6 +88,9 @@ static void Initialize(Local<Object> target,
     }
   }
 
+  if (config_module_entry_point)
+    READONLY_BOOLEAN_PROPERTY("moduleEntryPoint");
+
   if (config_experimental_vm_modules)
     READONLY_BOOLEAN_PROPERTY("experimentalVMModules");
 

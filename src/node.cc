@@ -262,6 +262,11 @@ bool config_experimental_repl_await = false;
 // that is used by lib/internal/bootstrap/node.js
 std::string config_userland_loader;  // NOLINT(runtime/string)
 
+// Set in node.cc by ParseArgs when --module is used.
+// Used in node_config.cc to set a constant on process.binding('config')
+// that is used by lib/module.js
+bool config_module_entry_point = false;
+
 // Set by ParseArgs when --pending-deprecation or NODE_PENDING_DEPRECATION
 // is used.
 bool config_pending_deprecation = false;
@@ -2637,6 +2642,7 @@ static void CheckIfAllowedInEnv(const char* exe, bool is_env,
     // Node options, sorted in `node --help` order for ease of comparison.
     // Please, update NODE_OPTIONS section in cli.md if changed.
     "--enable-fips",
+    "--module",
     "--experimental-modules",
     "--experimental-repl-await",
     "--experimental-vm-modules",
@@ -2842,7 +2848,7 @@ static void ParseArgs(int* argc,
       config_experimental_worker = true;
     } else if (strcmp(arg, "--experimental-repl-await") == 0) {
       config_experimental_repl_await = true;
-    }  else if (strcmp(arg, "--loader") == 0) {
+    } else if (strcmp(arg, "--loader") == 0) {
       const char* module = argv[index + 1];
       if (!config_experimental_modules) {
         fprintf(stderr, "%s: %s requires --experimental-modules be enabled\n",
@@ -2855,6 +2861,13 @@ static void ParseArgs(int* argc,
       }
       args_consumed += 1;
       config_userland_loader = module;
+    } else if (strcmp(arg, "--module") == 0) {
+      if (!config_experimental_modules) {
+        fprintf(stderr, "%s: %s requires --experimental-modules be enabled\n",
+            argv[0], arg);
+        exit(9);
+      }
+      config_module_entry_point = true;
     } else if (strcmp(arg, "--prof-process") == 0) {
       prof_process = true;
       short_circuit = true;

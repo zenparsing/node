@@ -2642,7 +2642,6 @@ static void CheckIfAllowedInEnv(const char* exe, bool is_env,
     // Node options, sorted in `node --help` order for ease of comparison.
     // Please, update NODE_OPTIONS section in cli.md if changed.
     "--enable-fips",
-    "--module",
     "--experimental-modules",
     "--experimental-repl-await",
     "--experimental-vm-modules",
@@ -2653,6 +2652,7 @@ static void CheckIfAllowedInEnv(const char* exe, bool is_env,
     "--inspect-brk",
     "--inspect-port",
     "--loader",
+    "--module",
     "--napi-modules",
     "--no-deprecation",
     "--no-force-async-hooks-checks",
@@ -2674,6 +2674,7 @@ static void CheckIfAllowedInEnv(const char* exe, bool is_env,
     "--use-openssl-ca",
     "--v8-pool-size",
     "--zero-fill-buffers",
+    "-m",
     "-r",
 
     // V8 options (define with '_', which allows '-' or '_')
@@ -2861,7 +2862,7 @@ static void ParseArgs(int* argc,
       }
       args_consumed += 1;
       config_userland_loader = module;
-    } else if (strcmp(arg, "--module") == 0) {
+    } else if (strcmp(arg, "--module") == 0 || strcmp(arg, "-m") == 0) {
       if (!config_experimental_modules) {
         fprintf(stderr, "%s: %s requires --experimental-modules be enabled\n",
             argv[0], arg);

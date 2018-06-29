@@ -543,31 +543,10 @@ const PackageConfig& GetPackageConfig(Environment* env,
   return entry.first->second;
 }
 
-enum ResolveExtensionsOptions {
-  TRY_EXACT_NAME,
-  ONLY_VIA_EXTENSIONS
-};
-
 inline bool ResolvesToFile(const URL& search) {
   std::string filePath = search.ToFilePath();
   Maybe<uv_file> check = CheckFile(filePath);
   return !check.IsNothing();
-}
-
-template <ResolveExtensionsOptions options>
-Maybe<URL> ResolveExtensions(const URL& search) {
-  if (options == TRY_EXACT_NAME && ResolvesToFile(search)) {
-    return Just(search);
-  }
-
-  for (const char* extension : EXTENSIONS) {
-    URL guess(search.path() + extension, &search);
-    if (ResolvesToFile(guess)) {
-      return Just(guess);
-    }
-  }
-
-  return Nothing<URL>();
 }
 
 Maybe<URL> ResolveMain(Environment* env, const URL& search) {

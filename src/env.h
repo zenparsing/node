@@ -70,15 +70,15 @@ struct IsValid {
   enum Bool { Yes, No };
 };
 
-struct HasMain {
+struct HasModule {
   enum Bool { Yes, No };
 };
 
 struct PackageConfig {
   const Exists::Bool exists;
   const IsValid::Bool is_valid;
-  const HasMain::Bool has_main;
-  const std::string main;
+  const HasModule::Bool has_module;
+  const std::string module;
 };
 }  // namespace loader
 
@@ -193,8 +193,6 @@ struct PackageConfig {
   V(issuercert_string, "issuerCertificate")                                   \
   V(kill_signal_string, "killSignal")                                         \
   V(mac_string, "mac")                                                        \
-  V(main_string, "main")                                                      \
-  V(module_string, "module")                                                  \
   V(max_buffer_string, "maxBuffer")                                           \
   V(max_semi_space_size_string, "maxSemiSpaceSize")                           \
   V(max_old_space_size_string, "maxOldSpaceSize")                             \
@@ -202,6 +200,7 @@ struct PackageConfig {
   V(message_port_string, "messagePort")                                       \
   V(message_port_constructor_string, "MessagePort")                           \
   V(minttl_string, "minttl")                                                  \
+  V(module_string, "module")                                                  \
   V(modulus_string, "modulus")                                                \
   V(name_string, "name")                                                      \
   V(netmask_string, "netmask")                                                \

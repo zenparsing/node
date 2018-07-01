@@ -12,15 +12,15 @@
 namespace node {
 namespace loader {
 
-enum PackageMainCheck : bool {
-    CheckMain = true,
-    IgnoreMain = false
+enum PackageConfigCheck : bool {
+    CheckPackageConfig = true,
+    IgnorePackageConfig = false
 };
 
 v8::Maybe<url::URL> Resolve(Environment* env,
                             const std::string& specifier,
                             const url::URL& base,
-                            PackageMainCheck read_pkg_json = CheckMain);
+                            PackageConfigCheck read_pkg_json);
 
 class ModuleWrap : public BaseObject {
  public:

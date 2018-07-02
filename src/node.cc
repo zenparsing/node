@@ -262,9 +262,9 @@ bool config_experimental_repl_await = false;
 // that is used by lib/internal/bootstrap/node.js
 std::string config_userland_loader;  // NOLINT(runtime/string)
 
-// Set in node.cc by ParseArgs when --module is used.
+// Set in node.cc by ParseArgs when --module or -m is used.
 // Used in node_config.cc to set a constant on process.binding('config')
-// that is used by lib/module.js
+// that is used by lib/internal/modules/cjs/loader.js
 bool config_module_entry_point = false;
 
 // Set by ParseArgs when --pending-deprecation or NODE_PENDING_DEPRECATION

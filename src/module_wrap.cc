@@ -529,10 +529,14 @@ const PackageConfig& GetPackageConfig(Environment* env,
     return entry.first->second;
   }
 
-  Local<Value> pkg_module;
   HasModule::Bool has_module = HasModule::No;
   std::string module_std;
-  if (pkg_json->Get(env->context(), env->module_string()).ToLocal(&pkg_module)) {
+
+  Local<Value> pkg_module;
+  MaybeLocal<Value> maybe_module =
+    pkg_json->Get(env->context(), env->module_string());
+
+  if (maybe_module.ToLocal(&pkg_module)) {
     has_module = HasModule::Yes;
     Utf8Value module_utf8(isolate, pkg_module);
     module_std.assign(std::string(*module_utf8, module_utf8.length()));
@@ -563,9 +567,9 @@ Maybe<URL> ResolvePackageEntry(Environment* env, const URL& search) {
   }
 
   if (!ShouldBeTreatedAsRelativeOrAbsolutePath(pjson.module)) {
-    return Resolve(env, "./" + pjson.module, search, IgnorePackageConfig);
+    return Resolve(env, "./" + pjson.module, search, IgnorePackageJson);
   }
-  return Resolve(env, pjson.module, search, IgnorePackageConfig);
+  return Resolve(env, pjson.module, search, IgnorePackageJson);
 }
 
 Maybe<URL> ResolveModule(Environment* env,
@@ -576,7 +580,7 @@ Maybe<URL> ResolveModule(Environment* env,
   do {
     dir = parent;
     Maybe<URL> check =
-        Resolve(env, "./node_modules/" + specifier, dir, CheckPackageConfig);
+        Resolve(env, "./node_modules/" + specifier, dir);
     if (!check.IsNothing()) {
       const size_t limit = specifier.find('/');
       const size_t spec_len =
@@ -598,7 +602,7 @@ Maybe<URL> ResolveModule(Environment* env,
 
 Maybe<URL> ResolveDirectory(Environment* env,
                             const URL& search,
-                            PackageConfigCheck check_pjson) {
+                            PackageJsonCheck check_pjson) {
   if (check_pjson) {
     Maybe<URL> main = ResolvePackageEntry(env, search);
     if (!main.IsNothing())
@@ -612,7 +616,7 @@ Maybe<URL> ResolveDirectory(Environment* env,
 Maybe<URL> Resolve(Environment* env,
                    const std::string& specifier,
                    const URL& base,
-                   PackageConfigCheck check_pjson) {
+                   PackageJsonCheck check_pjson) {
   URL pure_url(specifier);
   if (!(pure_url.flags() & URL_FLAGS_FAILED)) {
     // just check existence, without altering
@@ -657,7 +661,7 @@ void ModuleWrap::Resolve(const FunctionCallbackInfo<Value>& args) {
         env, "second argument is not a URL string");
   }
 
-  Maybe<URL> result = node::loader::Resolve(env, specifier_std, url, CheckPackageConfig);
+  Maybe<URL> result = node::loader::Resolve(env, specifier_std, url);
   if (result.IsNothing() || (result.FromJust().flags() & URL_FLAGS_FAILED)) {
     std::string msg = "Cannot find module " + specifier_std;
     return node::THROW_ERR_MISSING_MODULE(env, msg.c_str());

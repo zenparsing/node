@@ -42,6 +42,8 @@ using v8::TryCatch;
 using v8::Undefined;
 using v8::Value;
 
+static const char* const EXTENSIONS[] = {".mjs", ".js", ".json", ".node"};
+
 ModuleWrap::ModuleWrap(Environment* env,
                        Local<Object> object,
                        Local<Module> module,
@@ -551,6 +553,21 @@ inline bool ResolvesToFile(const URL& search) {
   return !check.IsNothing();
 }
 
+Maybe<URL> ResolveExtensions(const URL& search) {
+  if (ResolvesToFile(search)) {
+    return Just(search);
+  }
+
+  for (const char* extension : EXTENSIONS) {
+    URL guess(search.path() + extension, &search);
+    if (ResolvesToFile(guess)) {
+      return Just(guess);
+    }
+  }
+
+  return Nothing<URL>();
+}
+
 Maybe<URL> ResolvePackageEntry(Environment* env, const URL& search) {
   URL pkg("package.json", &search);
 
@@ -628,9 +645,9 @@ Maybe<URL> Resolve(Environment* env,
   }
   if (ShouldBeTreatedAsRelativeOrAbsolutePath(specifier)) {
     URL resolved(specifier, base);
-    if (ResolvesToFile(resolved)) {
-      return Just(resolved);
-    }
+    Maybe<URL> file = ResolveExtensions(resolved);
+    if (!file.IsNothing())
+      return file;
     if (specifier.back() != '/') {
       resolved = URL(specifier + "/", base);
     }

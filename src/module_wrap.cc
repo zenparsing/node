@@ -42,8 +42,6 @@ using v8::TryCatch;
 using v8::Undefined;
 using v8::Value;
 
-static const char* const EXTENSIONS[] = {".mjs", ".js", ".json", ".node"};
-
 ModuleWrap::ModuleWrap(Environment* env,
                        Local<Object> object,
                        Local<Module> module,

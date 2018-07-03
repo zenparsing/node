@@ -36,6 +36,7 @@ module.exports = {
       files: [
         'doc/api/esm.md',
         '*.mjs',
+        'test/es-module/test-esm-module-flag.js',
         'test/es-module/test-esm-example-loader.js',
       ],
       parserOptions: { sourceType: 'module' },

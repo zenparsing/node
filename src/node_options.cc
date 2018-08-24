@@ -45,8 +45,6 @@ EnvironmentOptionsParser::EnvironmentOptionsParser() {
   AddOption("--expose-internals", &EnvironmentOptions::expose_internals);
   // TODO(addaleax): Remove this when adding -/_ canonicalization to the parser.
   AddAlias("--expose_internals", "--expose-internals");
-  AddOption("--loader", &EnvironmentOptions::userland_loader,
-            kAllowedInEnvironment);
   AddOption("--no-deprecation", &EnvironmentOptions::no_deprecation,
             kAllowedInEnvironment);
   AddOption("--no-force-async-hooks-checks",

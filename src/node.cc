@@ -2387,8 +2387,6 @@ static void PrintHelp() {
          "  --inspect[=[host:]port]    activate inspector on host:port\n"
          "                             (default: 127.0.0.1:9229)\n"
 #endif  // HAVE_INSPECTOR
-         "  --loader=file              (with --experimental-modules) use the \n"
-         "                             specified file as a custom loader\n"
          "                             for ECMAScript Modules \n"
          "  --napi-modules             load N-API modules (no-op - option\n"
          "                             kept for compatibility)\n"
@@ -2779,12 +2777,6 @@ void ProcessArgv(std::vector<std::string>* args,
 
   // TODO(addaleax): Move this validation to the option parsers.
   auto env_opts = per_process_opts->per_isolate->per_env;
-  if (!env_opts->userland_loader.empty() &&
-      !env_opts->experimental_modules) {
-    fprintf(stderr, "%s: --loader requires --experimental-modules be enabled\n",
-            args->at(0).c_str());
-    exit(9);
-  }
 
   if (env_opts->syntax_check_only && env_opts->has_eval_string) {
     fprintf(stderr, "%s: either --check or --eval can be used, not both\n",

@@ -132,13 +132,6 @@ V8 inspector integration allows tools such as Chrome DevTools and IDEs to debug
 and profile Node.js instances. The tools attach to Node.js instances via a
 tcp port and communicate using the [Chrome DevTools Protocol][].
 
-### `--loader=file`
-<!--
-added: v9.0.0
--->
-
-Specify the `file` of the custom [experimental ECMAScript Module][] loader.
-
 ### `--napi-modules`
 <!-- YAML
 added: v7.10.0
@@ -543,7 +536,6 @@ Node options that are allowed are:
 - `--inspect`
 - `--inspect-brk`
 - `--inspect-port`
-- `--loader`
 - `--napi-modules`
 - `--no-deprecation`
 - `--no-force-async-hooks-checks`
@@ -693,5 +685,4 @@ greater than `4` (its current default value). For more information, see the
 [REPL]: repl.html
 [debugger]: debugger.html
 [emit_warning]: process.html#process_process_emitwarning_warning_type_code_ctor
-[experimental ECMAScript Module]: esm.html#esm_loader_hooks
 [libuv threadpool documentation]: http://docs.libuv.org/en/latest/threadpool.html

@@ -703,8 +703,6 @@ void RunBootstrapping(Environment* env) {
       FIXED_ONE_BYTE_STRING(isolate, "getInternalBinding"),
       // --inspect-brk-node
       FIXED_ONE_BYTE_STRING(isolate, "debugBreak"),
-      // --experimental-modules
-      FIXED_ONE_BYTE_STRING(isolate, "experimentalModules"),
       // --expose-internals
       FIXED_ONE_BYTE_STRING(isolate, "exposeInternals")};
   std::vector<Local<Value>> loaders_args = {
@@ -720,8 +718,6 @@ void RunBootstrapping(Environment* env) {
           .ToLocalChecked(),
       Boolean::New(isolate,
                    env->options()->debug_options().break_node_first_line),
-      Boolean::New(isolate,
-                   env->options()->experimental_modules),
       Boolean::New(isolate,
                    env->options()->expose_internals)};
 

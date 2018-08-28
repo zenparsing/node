@@ -12,9 +12,9 @@
 namespace node {
 namespace loader {
 
-enum PackageMainCheck : bool {
-    CheckMain = true,
-    IgnoreMain = false
+enum PackageJsonCheck : bool {
+    CheckPackageJson = true,
+    IgnorePackageJson = false
 };
 
 enum ScriptType : int {
@@ -31,7 +31,7 @@ enum HostDefinedOptions : int {
 v8::Maybe<url::URL> Resolve(Environment* env,
                             const std::string& specifier,
                             const url::URL& base,
-                            PackageMainCheck read_pkg_json = CheckMain);
+                            PackageJsonCheck read_pkg_json = CheckPackageJson);
 
 class ModuleWrap : public BaseObject {
  public:

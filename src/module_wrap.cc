@@ -5,7 +5,6 @@
 
 #include "env.h"
 #include "node_errors.h"
-#include "node_url.h"
 #include "util-inl.h"
 #include "node_contextify.h"
 #include "node_watchdog.h"
@@ -16,8 +15,6 @@ namespace loader {
 using errors::TryCatchScope;
 
 using node::contextify::ContextifyContext;
-using node::url::URL;
-using node::url::URL_FLAGS_FAILED;
 using v8::Array;
 using v8::Context;
 using v8::Function;
@@ -27,13 +24,11 @@ using v8::HandleScope;
 using v8::Integer;
 using v8::IntegrityLevel;
 using v8::Isolate;
-using v8::JSON;
 using v8::Just;
 using v8::Local;
 using v8::Maybe;
 using v8::MaybeLocal;
 using v8::Module;
-using v8::Nothing;
 using v8::Number;
 using v8::Object;
 using v8::PrimitiveArray;
@@ -43,8 +38,6 @@ using v8::ScriptOrigin;
 using v8::String;
 using v8::Undefined;
 using v8::Value;
-
-static const char* const EXTENSIONS[] = {".mjs", ".js", ".json", ".node"};
 
 ModuleWrap::ModuleWrap(Environment* env,
                        Local<Object> object,
@@ -184,57 +177,32 @@ void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(that);
 }
 
-void ModuleWrap::Link(const FunctionCallbackInfo<Value>& args) {
+void ModuleWrap::ResolveDependency(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   Isolate* isolate = args.GetIsolate();
 
-  CHECK_EQ(args.Length(), 1);
-  CHECK(args[0]->IsFunction());
+  CHECK_EQ(args.Length(), 2);
 
-  Local<Object> that = args.This();
+  Local<Object> receiver = args.This();
+  ModuleWrap* receiver_wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&receiver_wrap, receiver);
 
-  ModuleWrap* obj;
-  ASSIGN_OR_RETURN_UNWRAP(&obj, that);
-
-  if (obj->linked_)
+  if (receiver_wrap->linked_)
     return;
-  obj->linked_ = true;
 
-  Local<Function> resolver_arg = args[0].As<Function>();
+  CHECK(args[0]->IsString());
+  Local<String> specifier = args[0].As<String>();
+  Utf8Value specifier_utf8(env->isolate(), specifier);
+  std::string specifier_std(*specifier_utf8, specifier_utf8.length());
 
-  Local<Context> mod_context = obj->context_.Get(isolate);
-  Local<Module> module = obj->module_.Get(isolate);
-
-  Local<Array> promises = Array::New(isolate,
-                                     module->GetModuleRequestsLength());
-
-  // call the dependency resolve callbacks
-  for (int i = 0; i < module->GetModuleRequestsLength(); i++) {
-    Local<String> specifier = module->GetModuleRequest(i);
-    Utf8Value specifier_utf8(env->isolate(), specifier);
-    std::string specifier_std(*specifier_utf8, specifier_utf8.length());
-
-    Local<Value> argv[] = {
-      specifier
-    };
-
-    MaybeLocal<Value> maybe_resolve_return_value =
-        resolver_arg->Call(mod_context, that, 1, argv);
-    if (maybe_resolve_return_value.IsEmpty()) {
-      return;
-    }
-    Local<Value> resolve_return_value =
-        maybe_resolve_return_value.ToLocalChecked();
-    if (!resolve_return_value->IsPromise()) {
-      env->ThrowError("linking error, expected resolver to return a promise");
-    }
-    Local<Promise> resolve_promise = resolve_return_value.As<Promise>();
-    obj->resolve_cache_[specifier_std].Reset(env->isolate(), resolve_promise);
-
-    promises->Set(mod_context, i, resolve_promise).FromJust();
+  CHECK(args[1]->IsObject());
+  Local<Object> dependency = args[1].As<Object>();
+  if (dependency.IsEmpty() || !dependency->IsObject()) {
+    env->ThrowError("linking error, expected a valid module object");
   }
 
-  args.GetReturnValue().Set(promises);
+  receiver_wrap->resolve_cache_[specifier_std].Reset(
+      env->isolate(), dependency);
 }
 
 void ModuleWrap::Instantiate(const FunctionCallbackInfo<Value>& args) {
@@ -249,6 +217,7 @@ void ModuleWrap::Instantiate(const FunctionCallbackInfo<Value>& args) {
 
   // clear resolve cache on instantiate
   obj->resolve_cache_.clear();
+  obj->linked_ = true;
 
   if (!ok.FromMaybe(false)) {
     CHECK(try_catch.HasCaught());
@@ -319,7 +288,7 @@ void ModuleWrap::Evaluate(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(result.ToLocalChecked());
 }
 
-void ModuleWrap::Namespace(const FunctionCallbackInfo<Value>& args) {
+void ModuleWrap::GetNamespace(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   Isolate* isolate = args.GetIsolate();
   ModuleWrap* obj;
@@ -351,7 +320,7 @@ void ModuleWrap::GetStatus(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(module->GetStatus());
 }
 
-void ModuleWrap::GetStaticDependencySpecifiers(
+void ModuleWrap::GetDependencySpecifiers(
     const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   ModuleWrap* obj;
@@ -400,316 +369,15 @@ MaybeLocal<Module> ModuleWrap::ResolveCallback(Local<Context> context,
     return MaybeLocal<Module>();
   }
 
-  Local<Promise> resolve_promise =
+  Local<Object> module_object =
       dependent->resolve_cache_[specifier_std].Get(isolate);
 
-  if (resolve_promise->State() != Promise::kFulfilled) {
-    env->ThrowError("linking error, dependency promises must be resolved on "
-                    "instantiate");
-    return MaybeLocal<Module>();
-  }
-
-  Local<Object> module_object = resolve_promise->Result().As<Object>();
-  if (module_object.IsEmpty() || !module_object->IsObject()) {
-    env->ThrowError("linking error, expected a valid module object from "
-                    "resolver");
-    return MaybeLocal<Module>();
-  }
+  CHECK(!module_object.IsEmpty());
+  CHECK(module_object->IsObject());
 
   ModuleWrap* module;
   ASSIGN_OR_RETURN_UNWRAP(&module, module_object, MaybeLocal<Module>());
   return module->module_.Get(isolate);
-}
-
-namespace {
-
-// Tests whether a path starts with /, ./ or ../
-// In WhatWG terminology, the alternative case is called a "bare" specifier
-// (e.g. in `import "jquery"`).
-inline bool ShouldBeTreatedAsRelativeOrAbsolutePath(
-    const std::string& specifier) {
-  size_t len = specifier.length();
-  if (len == 0)
-    return false;
-  if (specifier[0] == '/') {
-    return true;
-  } else if (specifier[0] == '.') {
-    if (len == 1 || specifier[1] == '/')
-      return true;
-    if (specifier[1] == '.') {
-      if (len == 2 || specifier[2] == '/')
-        return true;
-    }
-  }
-  return false;
-}
-
-std::string ReadFile(uv_file file) {
-  std::string contents;
-  uv_fs_t req;
-  char buffer_memory[4096];
-  uv_buf_t buf = uv_buf_init(buffer_memory, sizeof(buffer_memory));
-
-  do {
-    const int r = uv_fs_read(uv_default_loop(),
-                             &req,
-                             file,
-                             &buf,
-                             1,
-                             contents.length(),  // offset
-                             nullptr);
-    uv_fs_req_cleanup(&req);
-
-    if (r <= 0)
-      break;
-    contents.append(buf.base, r);
-  } while (true);
-  return contents;
-}
-
-enum CheckFileOptions {
-  LEAVE_OPEN_AFTER_CHECK,
-  CLOSE_AFTER_CHECK
-};
-
-Maybe<uv_file> CheckFile(const std::string& path,
-                         CheckFileOptions opt = CLOSE_AFTER_CHECK) {
-  uv_fs_t fs_req;
-  if (path.empty()) {
-    return Nothing<uv_file>();
-  }
-
-  uv_file fd = uv_fs_open(nullptr, &fs_req, path.c_str(), O_RDONLY, 0, nullptr);
-  uv_fs_req_cleanup(&fs_req);
-
-  if (fd < 0) {
-    return Nothing<uv_file>();
-  }
-
-  uv_fs_fstat(nullptr, &fs_req, fd, nullptr);
-  uint64_t is_directory = fs_req.statbuf.st_mode & S_IFDIR;
-  uv_fs_req_cleanup(&fs_req);
-
-  if (is_directory) {
-    CHECK_EQ(0, uv_fs_close(nullptr, &fs_req, fd, nullptr));
-    uv_fs_req_cleanup(&fs_req);
-    return Nothing<uv_file>();
-  }
-
-  if (opt == CLOSE_AFTER_CHECK) {
-    CHECK_EQ(0, uv_fs_close(nullptr, &fs_req, fd, nullptr));
-    uv_fs_req_cleanup(&fs_req);
-  }
-
-  return Just(fd);
-}
-
-using Exists = PackageConfig::Exists;
-using IsValid = PackageConfig::IsValid;
-using HasMain = PackageConfig::HasMain;
-
-const PackageConfig& GetPackageConfig(Environment* env,
-                                      const std::string& path) {
-  auto existing = env->package_json_cache.find(path);
-  if (existing != env->package_json_cache.end()) {
-    return existing->second;
-  }
-  Maybe<uv_file> check = CheckFile(path, LEAVE_OPEN_AFTER_CHECK);
-  if (check.IsNothing()) {
-    auto entry = env->package_json_cache.emplace(path,
-        PackageConfig { Exists::No, IsValid::Yes, HasMain::No, "" });
-    return entry.first->second;
-  }
-
-  Isolate* isolate = env->isolate();
-  v8::HandleScope handle_scope(isolate);
-
-  std::string pkg_src = ReadFile(check.FromJust());
-  uv_fs_t fs_req;
-  CHECK_EQ(0, uv_fs_close(nullptr, &fs_req, check.FromJust(), nullptr));
-  uv_fs_req_cleanup(&fs_req);
-
-  Local<String> src;
-  if (!String::NewFromUtf8(isolate,
-                           pkg_src.c_str(),
-                           v8::NewStringType::kNormal,
-                           pkg_src.length()).ToLocal(&src)) {
-    auto entry = env->package_json_cache.emplace(path,
-        PackageConfig { Exists::No, IsValid::Yes, HasMain::No, "" });
-    return entry.first->second;
-  }
-
-  Local<Value> pkg_json_v;
-  Local<Object> pkg_json;
-
-  if (!JSON::Parse(env->context(), src).ToLocal(&pkg_json_v) ||
-      !pkg_json_v->ToObject(env->context()).ToLocal(&pkg_json)) {
-    auto entry = env->package_json_cache.emplace(path,
-        PackageConfig { Exists::Yes, IsValid::No, HasMain::No, "" });
-    return entry.first->second;
-  }
-
-  Local<Value> pkg_main;
-  HasMain has_main = HasMain::No;
-  std::string main_std;
-  if (pkg_json->Get(env->context(), env->main_string()).ToLocal(&pkg_main)) {
-    has_main = HasMain::Yes;
-    Utf8Value main_utf8(isolate, pkg_main);
-    main_std.assign(std::string(*main_utf8, main_utf8.length()));
-  }
-
-  auto entry = env->package_json_cache.emplace(path,
-      PackageConfig { Exists::Yes, IsValid::Yes, has_main, main_std });
-  return entry.first->second;
-}
-
-enum ResolveExtensionsOptions {
-  TRY_EXACT_NAME,
-  ONLY_VIA_EXTENSIONS
-};
-
-template <ResolveExtensionsOptions options>
-Maybe<URL> ResolveExtensions(const URL& search) {
-  if (options == TRY_EXACT_NAME) {
-    std::string filePath = search.ToFilePath();
-    Maybe<uv_file> check = CheckFile(filePath);
-    if (!check.IsNothing()) {
-      return Just(search);
-    }
-  }
-
-  for (const char* extension : EXTENSIONS) {
-    URL guess(search.path() + extension, &search);
-    Maybe<uv_file> check = CheckFile(guess.ToFilePath());
-    if (!check.IsNothing()) {
-      return Just(guess);
-    }
-  }
-
-  return Nothing<URL>();
-}
-
-inline Maybe<URL> ResolveIndex(const URL& search) {
-  return ResolveExtensions<ONLY_VIA_EXTENSIONS>(URL("index", search));
-}
-
-Maybe<URL> ResolveMain(Environment* env, const URL& search) {
-  URL pkg("package.json", &search);
-
-  const PackageConfig& pjson =
-      GetPackageConfig(env, pkg.ToFilePath());
-  // Note invalid package.json should throw in resolver
-  // currently we silently ignore which is incorrect
-  if (pjson.exists == Exists::No ||
-      pjson.is_valid == IsValid::No ||
-      pjson.has_main == HasMain::No) {
-    return Nothing<URL>();
-  }
-  if (!ShouldBeTreatedAsRelativeOrAbsolutePath(pjson.main)) {
-    return Resolve(env, "./" + pjson.main, search, IgnoreMain);
-  }
-  return Resolve(env, pjson.main, search, IgnoreMain);
-}
-
-Maybe<URL> ResolveModule(Environment* env,
-                         const std::string& specifier,
-                         const URL& base) {
-  URL parent(".", base);
-  URL dir("");
-  do {
-    dir = parent;
-    Maybe<URL> check =
-        Resolve(env, "./node_modules/" + specifier, dir, CheckMain);
-    if (!check.IsNothing()) {
-      const size_t limit = specifier.find('/');
-      const size_t spec_len =
-          limit == std::string::npos ? specifier.length() :
-                                       limit + 1;
-      std::string chroot =
-          dir.path() + "node_modules/" + specifier.substr(0, spec_len);
-      if (check.FromJust().path().substr(0, chroot.length()) != chroot) {
-        return Nothing<URL>();
-      }
-      return check;
-    } else {
-      // TODO(bmeck) PREVENT FALLTHROUGH
-    }
-    parent = URL("..", &dir);
-  } while (parent.path() != dir.path());
-  return Nothing<URL>();
-}
-
-Maybe<URL> ResolveDirectory(Environment* env,
-                            const URL& search,
-                            PackageMainCheck check_pjson_main) {
-  if (check_pjson_main) {
-    Maybe<URL> main = ResolveMain(env, search);
-    if (!main.IsNothing())
-      return main;
-  }
-  return ResolveIndex(search);
-}
-
-}  // anonymous namespace
-
-Maybe<URL> Resolve(Environment* env,
-                   const std::string& specifier,
-                   const URL& base,
-                   PackageMainCheck check_pjson_main) {
-  URL pure_url(specifier);
-  if (!(pure_url.flags() & URL_FLAGS_FAILED)) {
-    // just check existence, without altering
-    Maybe<uv_file> check = CheckFile(pure_url.ToFilePath());
-    if (check.IsNothing()) {
-      return Nothing<URL>();
-    }
-    return Just(pure_url);
-  }
-  if (specifier.length() == 0) {
-    return Nothing<URL>();
-  }
-  if (ShouldBeTreatedAsRelativeOrAbsolutePath(specifier)) {
-    URL resolved(specifier, base);
-    Maybe<URL> file = ResolveExtensions<TRY_EXACT_NAME>(resolved);
-    if (!file.IsNothing())
-      return file;
-    if (specifier.back() != '/') {
-      resolved = URL(specifier + "/", base);
-    }
-    return ResolveDirectory(env, resolved, check_pjson_main);
-  } else {
-    return ResolveModule(env, specifier, base);
-  }
-}
-
-void ModuleWrap::Resolve(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-
-  // module.resolve(specifier, url)
-  CHECK_EQ(args.Length(), 2);
-
-  CHECK(args[0]->IsString());
-  Utf8Value specifier_utf8(env->isolate(), args[0]);
-  std::string specifier_std(*specifier_utf8, specifier_utf8.length());
-
-  CHECK(args[1]->IsString());
-  Utf8Value url_utf8(env->isolate(), args[1]);
-  URL url(*url_utf8, url_utf8.length());
-
-  if (url.flags() & URL_FLAGS_FAILED) {
-    return node::THROW_ERR_INVALID_ARG_TYPE(
-        env, "second argument is not a URL string");
-  }
-
-  Maybe<URL> result = node::loader::Resolve(env, specifier_std, url);
-  if (result.IsNothing() || (result.FromJust().flags() & URL_FLAGS_FAILED)) {
-    std::string msg = "Cannot find module " + specifier_std;
-    return node::THROW_ERR_MISSING_MODULE(env, msg.c_str());
-  }
-
-  MaybeLocal<Value> obj = result.FromJust().ToObject(env);
-  if (!obj.IsEmpty())
-    args.GetReturnValue().Set(obj.ToLocalChecked());
 }
 
 static MaybeLocal<Promise> ImportModuleDynamically(
@@ -831,18 +499,17 @@ void ModuleWrap::Initialize(Local<Object> target,
   tpl->SetClassName(FIXED_ONE_BYTE_STRING(isolate, "ModuleWrap"));
   tpl->InstanceTemplate()->SetInternalFieldCount(1);
 
-  env->SetProtoMethod(tpl, "link", Link);
+  env->SetProtoMethod(tpl, "resolveDependency", ResolveDependency);
   env->SetProtoMethod(tpl, "instantiate", Instantiate);
   env->SetProtoMethod(tpl, "evaluate", Evaluate);
-  env->SetProtoMethodNoSideEffect(tpl, "namespace", Namespace);
+  env->SetProtoMethodNoSideEffect(tpl, "getNamespace", GetNamespace);
   env->SetProtoMethodNoSideEffect(tpl, "getStatus", GetStatus);
   env->SetProtoMethodNoSideEffect(tpl, "getError", GetError);
-  env->SetProtoMethodNoSideEffect(tpl, "getStaticDependencySpecifiers",
-                                  GetStaticDependencySpecifiers);
+  env->SetProtoMethodNoSideEffect(tpl, "getDependencySpecifiers",
+                                  GetDependencySpecifiers);
 
   target->Set(env->context(), FIXED_ONE_BYTE_STRING(isolate, "ModuleWrap"),
               tpl->GetFunction(context).ToLocalChecked()).FromJust();
-  env->SetMethod(target, "resolve", Resolve);
   env->SetMethod(target,
                  "setImportModuleDynamicallyCallback",
                  SetImportModuleDynamicallyCallback);

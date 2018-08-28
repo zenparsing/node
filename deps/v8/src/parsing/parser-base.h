@@ -4972,6 +4972,26 @@ typename ParserBase<Impl>::StatementT ParserBase<Impl>::ParseStatementListItem(
   //   LetOrConst BindingList[?In, ?Yield] ;
 
   switch (peek()) {
+    case Token::EXPORT:
+      if (!parsing_module_) {
+        ReportMessage(MessageTemplate::kExportDeclarationOutsideModule);
+        *ok = false;
+        return impl()->NullStatement();
+      }
+      break;
+    case Token::IMPORT:
+      switch (PeekAhead()) {
+        case Token::IDENTIFIER:
+        case Token::STRING:
+        case Token::MUL:
+        case Token::LBRACE:
+          if (!parsing_module_) {
+            ReportMessage(MessageTemplate::kImportDeclarationOutsideModule);
+            *ok = false;
+            return impl()->NullStatement();
+          }
+      }
+      break;
     case Token::FUNCTION:
       return ParseHoistableDeclaration(nullptr, false, ok);
     case Token::CLASS:

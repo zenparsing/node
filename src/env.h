@@ -75,12 +75,12 @@ class ModuleWrap;
 struct PackageConfig {
   enum class Exists { Yes, No };
   enum class IsValid { Yes, No };
-  enum class HasMain { Yes, No };
+  enum class HasModule { Yes, No };
 
   Exists exists;
   IsValid is_valid;
-  HasMain has_main;
-  std::string main;
+  HasModule has_module;
+  std::string module;
 };
 }  // namespace loader
 

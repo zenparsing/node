@@ -598,6 +598,8 @@ class ErrorUtils : public AllStatic {
   T(DuplicateExport, "Duplicate export of '%'")                                \
   T(DuplicateProto,                                                            \
     "Duplicate __proto__ fields are not allowed in object literals")           \
+  T(ExportDeclarationOutsideModule,                                            \
+    "Export declaration cannot appear outside a module")                       \
   T(ForInOfLoopInitializer,                                                    \
     "% loop variable declaration may not have an initializer.")                \
   T(ForInOfLoopMultiBindings,                                                  \
@@ -615,6 +617,8 @@ class ErrorUtils : public AllStatic {
   T(IllegalLanguageModeDirective,                                              \
     "Illegal '%' directive in function with non-simple parameter list")        \
   T(IllegalReturn, "Illegal return statement")                                 \
+  T(ImportDeclarationOutsideModule,                                            \
+    "Import declaration cannot appear outside a module")                       \
   T(IntrinsicWithSpread, "Intrinsic calls do not support spread arguments")    \
   T(InvalidRestBindingPattern,                                                 \
     "`...` must be followed by an identifier in declaration contexts")         \

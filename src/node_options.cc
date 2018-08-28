@@ -99,10 +99,6 @@ void PerIsolateOptions::CheckOptions(std::vector<std::string>* errors) {
 }
 
 void EnvironmentOptions::CheckOptions(std::vector<std::string>* errors) {
-  if (!userland_loader.empty() && !experimental_modules) {
-    errors->push_back("--loader requires --experimental-modules be enabled");
-  }
-
   if (syntax_check_only && has_eval_string) {
     errors->push_back("either --check or --eval can be used, not both");
   }
@@ -169,10 +165,6 @@ DebugOptionsParser::DebugOptionsParser() {
 }
 
 EnvironmentOptionsParser::EnvironmentOptionsParser() {
-  AddOption("--experimental-modules",
-            "experimental ES Module support and caching modules",
-            &EnvironmentOptions::experimental_modules,
-            kAllowedInEnvironment);
   AddOption("--experimental-policy",
             "use the specified file as a "
             "security policy",
@@ -198,11 +190,6 @@ EnvironmentOptionsParser::EnvironmentOptionsParser() {
             "Select which HTTP parser to use; either 'legacy' or 'llhttp' "
             "(default: llhttp).",
             &EnvironmentOptions::http_parser,
-            kAllowedInEnvironment);
-  AddOption("--loader",
-            "(with --experimental-modules) use the specified file as a "
-            "custom loader",
-            &EnvironmentOptions::userland_loader,
             kAllowedInEnvironment);
   AddOption("--no-deprecation",
             "silence deprecation warnings",

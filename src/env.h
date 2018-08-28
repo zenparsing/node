@@ -71,18 +71,7 @@ class Worker;
 
 namespace loader {
 class ModuleWrap;
-
-struct PackageConfig {
-  enum class Exists { Yes, No };
-  enum class IsValid { Yes, No };
-  enum class HasMain { Yes, No };
-
-  Exists exists;
-  IsValid is_valid;
-  HasMain has_main;
-  std::string main;
-};
-}  // namespace loader
+}
 
 // Stat fields buffers contain twice the number of entries in an uv_stat_t
 // because `fs.StatWatcher` needs room to store 2 `fs.Stats` instances.
@@ -208,7 +197,6 @@ constexpr size_t kFsStatsBufferLength = kFsStatsFieldsNumber * 2;
   V(kind_string, "kind")                                                       \
   V(library_string, "library")                                                 \
   V(mac_string, "mac")                                                         \
-  V(main_string, "main")                                                       \
   V(max_buffer_string, "maxBuffer")                                            \
   V(message_port_constructor_string, "MessagePort")                            \
   V(message_port_string, "messagePort")                                        \
@@ -732,9 +720,6 @@ class Environment {
   inline uint32_t get_next_module_id();
   inline uint32_t get_next_script_id();
   inline uint32_t get_next_function_id();
-
-  std::unordered_map<std::string, const loader::PackageConfig>
-      package_json_cache;
 
   inline double* heap_statistics_buffer() const;
   inline void set_heap_statistics_buffer(double* pointer);

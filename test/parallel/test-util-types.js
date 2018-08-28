@@ -1,4 +1,4 @@
-// Flags: --experimental-vm-modules --expose-internals
+// Flags: --expose-internals
 'use strict';
 require('../common');
 const fixtures = require('../common/fixtures');
@@ -277,11 +277,3 @@ for (const [ value, _method ] of [
     assert.deepStrictEqual(yup, expected[testedFunc]);
   }
 }
-
-(async () => {
-  const m = new vm.SourceTextModule('');
-  await m.link(() => 0);
-  m.instantiate();
-  await m.evaluate();
-  assert.ok(types.isModuleNamespaceObject(m.namespace));
-})();

@@ -85,10 +85,8 @@ class DebugOptions : public Options {
 class EnvironmentOptions : public Options {
  public:
   bool abort_on_uncaught_exception = false;
-  bool experimental_modules = false;
   std::string experimental_policy;
   bool experimental_repl_await = false;
-  bool experimental_vm_modules = false;
   bool expose_internals = false;
   std::string http_parser = "llhttp";
   bool no_deprecation = false;
@@ -103,7 +101,6 @@ class EnvironmentOptions : public Options {
   bool trace_deprecation = false;
   bool trace_sync_io = false;
   bool trace_warnings = false;
-  std::string userland_loader;
 
   bool syntax_check_only = false;
   bool has_eval_string = false;

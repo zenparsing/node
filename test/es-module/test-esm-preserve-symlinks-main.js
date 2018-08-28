@@ -34,7 +34,7 @@ try {
   common.skip('insufficient privileges for symlinks');
 }
 
-function doTest(flags, done) {
+function doTest(flags) {
   // Invoke the main file via a symlink.  In this case --preserve-symlinks-main
   // dictates that it'll resolve relative imports in the main file relative to
   // the symlink, and not relative to the symlink target; the file structure set
@@ -46,12 +46,11 @@ function doTest(flags, done) {
         ]),
         { stdio: 'inherit' }).on('exit', (code) => {
     assert.strictEqual(code, 0);
-    done();
   });
 }
 
 // First test the commonjs module loader
 doTest([], () => {
   // now test the new loader
-  doTest(['--experimental-modules'], () => {});
+  doTest(['--module'], () => {});
 });

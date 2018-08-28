@@ -1,6 +1,5 @@
-// Flags: --experimental-modules
 /* eslint-disable node-core/required-modules */
-import common from './index.js';
+const common = import.meta.require('./index.js');
 
 const {
   isMainThread,

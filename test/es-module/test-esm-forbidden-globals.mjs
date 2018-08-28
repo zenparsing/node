@@ -1,5 +1,6 @@
-// Flags: --experimental-modules
-import '../common';
+// Flags: --module
+/* eslint-disable node-core/required-modules */
+import '../common/index.mjs';
 
 // eslint-disable-next-line no-undef
 if (typeof arguments !== 'undefined') {

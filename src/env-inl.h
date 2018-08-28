@@ -477,16 +477,6 @@ Environment::stream_base_state() {
   return stream_base_state_;
 }
 
-inline uint32_t Environment::get_next_module_id() {
-  return module_id_counter_++;
-}
-inline uint32_t Environment::get_next_script_id() {
-  return script_id_counter_++;
-}
-inline uint32_t Environment::get_next_function_id() {
-  return function_id_counter_++;
-}
-
 Environment::ShouldNotAbortOnUncaughtScope::ShouldNotAbortOnUncaughtScope(
     Environment* env)
     : env_(env) {

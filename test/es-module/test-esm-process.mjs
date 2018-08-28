@@ -1,5 +1,5 @@
-// Flags: --experimental-modules
-import '../common';
+// Flags: --module
+import '../common/index.mjs';
 import assert from 'assert';
 import process from 'process';
 

@@ -1,4 +1,3 @@
-// Flags: --experimental-modules
 'use strict';
 const common = require('../common');
 const assert = require('assert');
@@ -18,6 +17,10 @@ function expectErrorProperty(result, propertyKey, value) {
 
 function expectMissingModuleError(result) {
   expectErrorProperty(result, 'code', 'MODULE_NOT_FOUND');
+}
+
+function expectInvalidSchemeError(result) {
+  expectErrorProperty(result, 'code', 'ERR_INVALID_URL_SCHEME');
 }
 
 function expectOkNamespace(result) {
@@ -58,6 +61,6 @@ function expectFsNamespace(result) {
   // TODO(jkrems): Right now this doesn't hit a protocol error because the
   // module resolution step already rejects it. These arguably should be
   // protocol errors.
-  expectMissingModuleError(import('node:fs'));
-  expectMissingModuleError(import('http://example.com/foo.js'));
+  expectInvalidSchemeError(import('node:fs'));
+  expectInvalidSchemeError(import('http://example.com/foo.js'));
 })();

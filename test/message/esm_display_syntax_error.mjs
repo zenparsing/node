@@ -1,3 +1,3 @@
-// Flags:  --experimental-modules
+// Flags: --module
 'use strict';
 await async () => 0;

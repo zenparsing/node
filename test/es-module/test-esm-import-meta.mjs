@@ -1,11 +1,11 @@
-// Flags: --experimental-modules
-
-import '../common';
+// Flags: --module
+/* eslint-disable node-core/required-modules */
+import '../common/index.mjs';
 import assert from 'assert';
 
 assert.strictEqual(Object.getPrototypeOf(import.meta), null);
 
-const keys = ['url'];
+const keys = ['url', 'require'];
 assert.deepStrictEqual(Reflect.ownKeys(import.meta), keys);
 
 const descriptors = Object.getOwnPropertyDescriptors(import.meta);

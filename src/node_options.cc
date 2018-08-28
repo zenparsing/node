@@ -103,10 +103,6 @@ void PerIsolateOptions::CheckOptions(std::vector<std::string>* errors) {
 }
 
 void EnvironmentOptions::CheckOptions(std::vector<std::string>* errors) {
-  if (!userland_loader.empty() && !experimental_modules) {
-    errors->push_back("--loader requires --experimental-modules be enabled");
-  }
-
   if (syntax_check_only && has_eval_string) {
     errors->push_back("either --check or --eval can be used, not both");
   }
@@ -214,10 +210,6 @@ DebugOptionsParser::DebugOptionsParser() {
 }
 
 EnvironmentOptionsParser::EnvironmentOptionsParser() {
-  AddOption("--experimental-modules",
-            "experimental ES Module support and caching modules",
-            &EnvironmentOptions::experimental_modules,
-            kAllowedInEnvironment);
   AddOption("--experimental-policy",
             "use the specified file as a "
             "security policy",
@@ -226,10 +218,6 @@ EnvironmentOptionsParser::EnvironmentOptionsParser() {
   AddOption("--experimental-repl-await",
             "experimental await keyword support in REPL",
             &EnvironmentOptions::experimental_repl_await,
-            kAllowedInEnvironment);
-  AddOption("--experimental-vm-modules",
-            "experimental ES Module support in vm module",
-            &EnvironmentOptions::experimental_vm_modules,
             kAllowedInEnvironment);
   AddOption("--experimental-worker", "", NoOp{}, kAllowedInEnvironment);
 #ifdef NODE_REPORT
@@ -248,11 +236,11 @@ EnvironmentOptionsParser::EnvironmentOptionsParser() {
             "(default: llhttp).",
             &EnvironmentOptions::http_parser,
             kAllowedInEnvironment);
-  AddOption("--loader",
-            "(with --experimental-modules) use the specified file as a "
-            "custom loader",
-            &EnvironmentOptions::userland_loader,
+  AddOption("--module",
+            "Parse the main file as an ES module",
+            &EnvironmentOptions::esm_main_module,
             kAllowedInEnvironment);
+  AddAlias("-m", "--module");
   AddOption("--no-deprecation",
             "silence deprecation warnings",
             &EnvironmentOptions::no_deprecation,

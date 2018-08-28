@@ -71,18 +71,7 @@ class Worker;
 
 namespace loader {
 class ModuleWrap;
-
-struct PackageConfig {
-  enum class Exists { Yes, No };
-  enum class IsValid { Yes, No };
-  enum class HasMain { Yes, No };
-
-  Exists exists;
-  IsValid is_valid;
-  HasMain has_main;
-  std::string main;
-};
-}  // namespace loader
+}
 
 // Stat fields buffers contain twice the number of entries in an uv_stat_t
 // because `fs.StatWatcher` needs room to store 2 `fs.Stats` instances.
@@ -196,8 +185,10 @@ constexpr size_t kFsStatsBufferLength = kFsStatsFieldsNumber * 2;
   V(host_string, "host")                                                       \
   V(hostmaster_string, "hostmaster")                                           \
   V(ignore_string, "ignore")                                                   \
+  V(import_module_string, "importModule")                                      \
   V(infoaccess_string, "infoAccess")                                           \
   V(inherit_string, "inherit")                                                 \
+  V(initialize_import_meta_string, "initializeImportMeta")                     \
   V(input_string, "input")                                                     \
   V(internal_binding_string, "internalBinding")                                \
   V(internal_string, "internal")                                               \
@@ -210,7 +201,6 @@ constexpr size_t kFsStatsBufferLength = kFsStatsFieldsNumber * 2;
   V(kind_string, "kind")                                                       \
   V(library_string, "library")                                                 \
   V(mac_string, "mac")                                                         \
-  V(main_string, "main")                                                       \
   V(max_buffer_string, "maxBuffer")                                            \
   V(message_port_constructor_string, "MessagePort")                            \
   V(message_port_string, "messagePort")                                        \
@@ -457,12 +447,6 @@ struct ContextInfo {
   const std::string name;
   std::string origin;
   bool is_default = false;
-};
-
-struct CompileFnEntry {
-  Environment* env;
-  uint32_t id;
-  CompileFnEntry(Environment* env, uint32_t id);
 };
 
 // Listing the AsyncWrap provider types first enables us to cast directly
@@ -775,18 +759,6 @@ class Environment {
   std::set<std::string> native_modules_without_cache;
 
   std::unordered_multimap<int, loader::ModuleWrap*> hash_to_module_map;
-  std::unordered_map<uint32_t, loader::ModuleWrap*> id_to_module_map;
-  std::unordered_map<uint32_t, contextify::ContextifyScript*>
-      id_to_script_map;
-  std::unordered_set<CompileFnEntry*> compile_fn_entries;
-  std::unordered_map<uint32_t, Persistent<v8::Function>> id_to_function_map;
-
-  inline uint32_t get_next_module_id();
-  inline uint32_t get_next_script_id();
-  inline uint32_t get_next_function_id();
-
-  std::unordered_map<std::string, const loader::PackageConfig>
-      package_json_cache;
 
   inline double* heap_statistics_buffer() const;
   inline void set_heap_statistics_buffer(double* pointer);
@@ -1059,10 +1031,6 @@ class Environment {
   // used.
   std::shared_ptr<HostPort> inspector_host_port_;
   std::vector<std::string> exec_argv_;
-
-  uint32_t module_id_counter_ = 0;
-  uint32_t script_id_counter_ = 0;
-  uint32_t function_id_counter_ = 0;
 
   AliasedBuffer<uint32_t, v8::Uint32Array> should_abort_on_uncaught_toggle_;
   int should_not_abort_scope_counter_ = 0;

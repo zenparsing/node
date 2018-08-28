@@ -61,8 +61,6 @@ class ContextifyContext {
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static void WeakCallback(
       const v8::WeakCallbackInfo<ContextifyContext>& data);
-  static void WeakCallbackCompileFn(
-      const v8::WeakCallbackInfo<CompileFnEntry>& data);
   static void PropertyGetterCallback(
       v8::Local<v8::Name> property,
       const v8::PropertyCallbackInfo<v8::Value>& args);
@@ -110,7 +108,6 @@ class ContextifyScript : public BaseObject {
   SET_SELF_SIZE(ContextifyScript)
 
   ContextifyScript(Environment* env, v8::Local<v8::Object> object);
-  ~ContextifyScript() override;
 
   static void Init(Environment* env, v8::Local<v8::Object> target);
   static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -126,11 +123,8 @@ class ContextifyScript : public BaseObject {
                           const bool break_on_first_line,
                           const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  inline uint32_t id() { return id_; }
-
  private:
   node::Persistent<v8::UnboundScript> script_;
-  uint32_t id_;
 };
 
 }  // namespace contextify

@@ -4991,6 +4991,7 @@ typename ParserBase<Impl>::StatementT ParserBase<Impl>::ParseStatementListItem(
             return impl()->NullStatement();
           }
       }
+      break;
     case Token::FUNCTION:
       return ParseHoistableDeclaration(nullptr, false, ok);
     case Token::CLASS:

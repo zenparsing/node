@@ -14,5 +14,5 @@ for (const entryPoint of entryPoints) {
     continue;
   }
   assert.fail('Executing node with inexistent entry point should ' +
-              `fail. Entry point: ${entryPoint}, Flags: [${args}]`);
+              `fail. Entry point: ${entryPoint}`);
 }

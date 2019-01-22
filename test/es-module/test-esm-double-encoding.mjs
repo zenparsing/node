@@ -1,4 +1,3 @@
-// TODO(zenparsing): This is resulting in a crash now
 import '../common';
 
 // Assert we can import files with `%` in their pathname.

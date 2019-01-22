@@ -26,7 +26,6 @@ import directory from './directory';
 
 assert.strictEqual(absolute, real);
 assert.strictEqual(relative, real);
-assert.strictEqual(ignoreExtension, real);
 assert.strictEqual(directory, real);
 `);
 

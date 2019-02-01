@@ -3,9 +3,7 @@ const common = require('../common');
 const assert = require('assert');
 const { Worker } = require('worker_threads');
 
-const worker = new Worker('./does-not-exist.js', {
-  execArgv: ['--experimental-modules'],
-});
+const worker = new Worker('./does-not-exist.js');
 
 worker.on('error', common.mustCall((err) => {
   // eslint-disable-next-line node-core/no-unescaped-regexp-dot

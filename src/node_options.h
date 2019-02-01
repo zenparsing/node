@@ -87,7 +87,6 @@ class EnvironmentOptions : public Options {
   bool abort_on_uncaught_exception = false;
   std::string experimental_policy;
   bool experimental_repl_await = false;
-  bool experimental_vm_modules = false;
   bool expose_internals = false;
   std::string http_parser = "llhttp";
   bool no_deprecation = false;

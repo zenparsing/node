@@ -6,16 +6,10 @@
 #include <unordered_map>
 #include <string>
 #include <vector>
-#include "node_url.h"
 #include "base_object-inl.h"
 
 namespace node {
 namespace loader {
-
-enum PackageJsonCheck : bool {
-    CheckPackageJson = true,
-    IgnorePackageJson = false
-};
 
 enum ScriptType : int {
   kScript,
@@ -27,11 +21,6 @@ enum HostDefinedOptions : int {
   kID = 9,
   kLength = 10,
 };
-
-v8::Maybe<url::URL> Resolve(Environment* env,
-                            const std::string& specifier,
-                            const url::URL& base,
-                            PackageJsonCheck read_pkg_json = CheckPackageJson);
 
 class ModuleWrap : public BaseObject {
  public:
@@ -73,7 +62,6 @@ class ModuleWrap : public BaseObject {
   static void GetStaticDependencySpecifiers(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  static void Resolve(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetImportModuleDynamicallyCallback(
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetInitializeImportMetaObjectCallback(

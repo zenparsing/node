@@ -145,6 +145,7 @@
       'lib/internal/main/worker_thread.js',
       'lib/internal/modules/cjs/helpers.js',
       'lib/internal/modules/cjs/loader.js',
+      'lib/internal/modules/cjs/resolver.js',
       'lib/internal/modules/esm/loader.js',
       'lib/internal/modules/esm/create_dynamic_module.js',
       'lib/internal/modules/esm/default_resolve.js',

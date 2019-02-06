@@ -71,18 +71,7 @@ class Worker;
 
 namespace loader {
 class ModuleWrap;
-
-struct PackageConfig {
-  enum class Exists { Yes, No };
-  enum class IsValid { Yes, No };
-  enum class HasModule { Yes, No };
-
-  Exists exists;
-  IsValid is_valid;
-  HasModule has_module;
-  std::string module;
-};
-}  // namespace loader
+}
 
 // Stat fields buffers contain twice the number of entries in an uv_stat_t
 // because `fs.StatWatcher` needs room to store 2 `fs.Stats` instances.
@@ -714,9 +703,6 @@ class Environment {
 
   inline uint32_t get_next_module_id();
   inline uint32_t get_next_script_id();
-
-  std::unordered_map<std::string, const loader::PackageConfig>
-      package_json_cache;
 
   inline double* heap_statistics_buffer() const;
   inline void set_heap_statistics_buffer(double* pointer);

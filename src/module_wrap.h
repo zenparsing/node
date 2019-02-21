@@ -62,7 +62,8 @@ class ModuleWrap : public BaseObject {
   static void GetError(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void GetDependencySpecifiers(
       const v8::FunctionCallbackInfo<v8::Value>& args);
-
+  static void SetModuleLoaderForContext(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetImportModuleDynamicallyCallback(
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetInitializeImportMetaObjectCallback(

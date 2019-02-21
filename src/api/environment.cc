@@ -192,6 +192,8 @@ Local<Context> NewContext(Isolate* isolate,
 
   context->SetEmbedderData(ContextEmbedderIndex::kAllowWasmCodeGeneration,
                            True(isolate));
+  context->SetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject,
+                           Undefined(isolate));
 
   {
     // Run lib/internal/bootstrap/context.js

@@ -191,6 +191,8 @@ MaybeLocal<Context> ContextifyContext::CreateV8Context(
   ctx->AllowCodeGenerationFromStrings(options.allow_code_gen_strings->IsTrue());
   ctx->SetEmbedderData(ContextEmbedderIndex::kAllowWasmCodeGeneration,
                        options.allow_code_gen_wasm);
+  ctx->SetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject,
+                       Undefined(env->isolate()));
 
   ContextInfo info(*name_val);
 

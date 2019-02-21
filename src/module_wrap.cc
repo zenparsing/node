@@ -407,32 +407,10 @@ static MaybeLocal<Promise> ImportModuleDynamically(
     return handle_scope.Escape(resolver->GetPromise());
   }
 
-  Local<Value> object;
-
-  int type = options->Get(iso, HostDefinedOptions::kType)
-                 .As<Number>()
-                 ->Int32Value(context)
-                 .ToChecked();
-  uint32_t id = options->Get(iso, HostDefinedOptions::kID)
-                    .As<Number>()
-                    ->Uint32Value(context)
-                    .ToChecked();
-  if (type == ScriptType::kScript) {
-    contextify::ContextifyScript* wrap = env->id_to_script_map.find(id)->second;
-    object = wrap->object();
-  } else if (type == ScriptType::kModule) {
-    ModuleWrap* wrap = ModuleWrap::GetFromID(env, id);
-    object = wrap->object();
-  } else if (type == ScriptType::kFunction) {
-    object = env->id_to_function_map.find(id)->second.Get(iso);
-  } else {
-    UNREACHABLE();
-  }
-
   Local<Value> import_args[] = {
-    object,
     Local<Value>(specifier),
-    Local<Value>(referrer->GetResourceName())
+    Local<Value>(referrer->GetResourceName()),
+    context->GetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject),
   };
 
   Local<Value> result;
@@ -472,10 +450,15 @@ void ModuleWrap::HostInitializeImportMetaObjectCallback(
     return;
   }
 
-  Local<Object> wrap = module_wrap->object();
   Local<Function> callback =
       env->host_initialize_import_meta_object_callback();
-  Local<Value> args[] = { wrap, meta };
+
+  Local<Value> args[] = {
+    meta,
+    Local<String>::New(env->isolate(), module_wrap->url_),
+    context->GetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject)
+  };
+
   callback->Call(context, Undefined(env->isolate()), arraysize(args), args)
       .ToLocalChecked();
 }
@@ -492,6 +475,29 @@ void ModuleWrap::SetInitializeImportMetaObjectCallback(
 
   isolate->SetHostInitializeImportMetaObjectCallback(
       HostInitializeImportMetaObjectCallback);
+}
+
+void ModuleWrap::SetModuleLoaderForContext(
+    const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  Isolate* isolate = env->isolate();
+
+  CHECK_EQ(args.Length(), 2);
+  CHECK(args[1]->IsObject());
+  ContextifyContext* sandbox =
+      ContextifyContext::ContextFromContextifiedSandbox(
+          env, args[1].As<Object>());
+  CHECK_NOT_NULL(sandbox);
+  Local<Context> context = sandbox->context();
+
+  CHECK_EQ(args.Length(), 2);
+  CHECK(args[2]->IsObject());
+  Local<Object> loader = args[2].As<Object>();
+
+  // TODO(zenparsing): Validate that loader has not been assigned
+  // to this context already.
+  context->SetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject,
+                           loader);
 }
 
 void ModuleWrap::Initialize(Local<Object> target,
@@ -522,6 +528,9 @@ void ModuleWrap::Initialize(Local<Object> target,
   env->SetMethod(target,
                  "setInitializeImportMetaObjectCallback",
                  SetInitializeImportMetaObjectCallback);
+  env->SetMethod(target,
+                 "setModuleLoaderForContext",
+                 SetModuleLoaderForContext);
 
 #define V(name)                                                                \
     target->Set(context,                                                       \

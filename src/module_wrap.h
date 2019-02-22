@@ -29,10 +29,16 @@ class ModuleWrap : public BaseObject {
                          v8::Local<v8::Value> unused,
                          v8::Local<v8::Context> context,
                          void* priv);
-  static void HostInitializeImportMetaObjectCallback(
+
+  static void InitializeImportMetaObjectCallback(
       v8::Local<v8::Context> context,
       v8::Local<v8::Module> module,
       v8::Local<v8::Object> meta);
+
+  static v8::MaybeLocal<v8::Promise> ImportModuleDynamicallyCallback(
+      v8::Local<v8::Context> context,
+      v8::Local<v8::ScriptOrModule> referrer,
+      v8::Local<v8::String> specifier);
 
   void MemoryInfo(MemoryTracker* tracker) const override {
     tracker->TrackField("url", url_);
@@ -62,11 +68,9 @@ class ModuleWrap : public BaseObject {
   static void GetError(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void GetDependencySpecifiers(
       const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void SetDefaultModuleLoader(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetModuleLoaderForContext(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void SetImportModuleDynamicallyCallback(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void SetInitializeImportMetaObjectCallback(
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static v8::MaybeLocal<v8::Module> ResolveCallback(
       v8::Local<v8::Context> context,

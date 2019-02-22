@@ -183,8 +183,10 @@ constexpr size_t kFsStatsBufferLength = kFsStatsFieldsNumber * 2;
   V(host_string, "host")                                                       \
   V(hostmaster_string, "hostmaster")                                           \
   V(ignore_string, "ignore")                                                   \
+  V(import_module_string, "importModule")                                      \
   V(infoaccess_string, "infoAccess")                                           \
   V(inherit_string, "inherit")                                                 \
+  V(initialize_import_meta_string, "initializeImportMeta")                     \
   V(input_string, "input")                                                     \
   V(internal_binding_string, "internalBinding")                                \
   V(internal_string, "internal")                                               \

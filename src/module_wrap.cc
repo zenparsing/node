@@ -39,6 +39,17 @@ using v8::String;
 using v8::Undefined;
 using v8::Value;
 
+namespace {
+
+Local<Promise> RejectWithError(Local<Context> context, Local<Value> error) {
+  Local<Promise::Resolver> resolver =
+      Promise::Resolver::New(context).ToLocalChecked();
+  resolver->Reject(context, error).ToChecked();
+  return resolver->GetPromise();
+}
+
+}  // anonymous namespace
+
 ModuleWrap::ModuleWrap(Environment* env,
                        Local<Object> object,
                        Local<Module> module,
@@ -383,42 +394,48 @@ MaybeLocal<Module> ModuleWrap::ResolveCallback(Local<Context> context,
   return module->module_.Get(isolate);
 }
 
-static MaybeLocal<Promise> ImportModuleDynamically(
+MaybeLocal<Promise> ModuleWrap::ImportModuleDynamicallyCallback(
     Local<Context> context,
     Local<v8::ScriptOrModule> referrer,
     Local<String> specifier) {
-  Isolate* iso = context->GetIsolate();
+  Isolate* isolate = context->GetIsolate();
   Environment* env = Environment::GetCurrent(context);
   CHECK_NOT_NULL(env);  // TODO(addaleax): Handle nullptr here.
-  v8::EscapableHandleScope handle_scope(iso);
-
-  Local<Function> import_callback =
-    env->host_import_module_dynamically_callback();
+  v8::EscapableHandleScope handle_scope(isolate);
 
   Local<PrimitiveArray> options = referrer->GetHostDefinedOptions();
   if (options->Length() != HostDefinedOptions::kLength) {
-    Local<Promise::Resolver> resolver =
-        Promise::Resolver::New(context).ToLocalChecked();
-    resolver
-        ->Reject(context,
-                 v8::Exception::TypeError(FIXED_ONE_BYTE_STRING(
-                     context->GetIsolate(), "Invalid host defined options")))
-        .ToChecked();
-    return handle_scope.Escape(resolver->GetPromise());
+    Local<String> msg = FIXED_ONE_BYTE_STRING(isolate,
+        "Invalid host defined options");
+    Local<Value> error = v8::Exception::TypeError(msg);
+    Local<Promise> rejection = RejectWithError(context, error);
+    return handle_scope.Escape(rejection);
   }
 
-  Local<Value> import_args[] = {
+  Local<Value> loader_val = context->GetEmbedderData(
+      ContextEmbedderIndex::kModuleLoaderObject);
+
+  if (!loader_val->IsObject() || loader_val->IsUndefined()) {
+    Local<String> msg = FIXED_ONE_BYTE_STRING(isolate,
+        "A module loader has not been associated with this context");
+    Local<Value> error = v8::Exception::Error(msg);
+    Local<Promise> rejection = RejectWithError(context, error);
+    return handle_scope.Escape(rejection);
+  }
+
+  Local<Object> loader = loader_val.As<Object>();
+  Local<Value> method_name = env->import_module_string();
+  Local<Function> method = loader->Get(context, method_name)
+      .ToLocalChecked()
+      .As<Function>();
+
+  Local<Value> args[] = {
     Local<Value>(specifier),
     Local<Value>(referrer->GetResourceName()),
-    context->GetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject),
   };
 
   Local<Value> result;
-  if (import_callback->Call(
-        context,
-        v8::Undefined(iso),
-        arraysize(import_args),
-        import_args).ToLocal(&result)) {
+  if (method->Call(context, loader, arraysize(args), args).ToLocal(&result)) {
     CHECK(result->IsPromise());
     return handle_scope.Escape(result.As<Promise>());
   }
@@ -426,21 +443,7 @@ static MaybeLocal<Promise> ImportModuleDynamically(
   return MaybeLocal<Promise>();
 }
 
-void ModuleWrap::SetImportModuleDynamicallyCallback(
-    const FunctionCallbackInfo<Value>& args) {
-  Isolate* iso = args.GetIsolate();
-  Environment* env = Environment::GetCurrent(args);
-  HandleScope handle_scope(iso);
-
-  CHECK_EQ(args.Length(), 1);
-  CHECK(args[0]->IsFunction());
-  Local<Function> import_callback = args[0].As<Function>();
-  env->set_host_import_module_dynamically_callback(import_callback);
-
-  iso->SetHostImportModuleDynamicallyCallback(ImportModuleDynamically);
-}
-
-void ModuleWrap::HostInitializeImportMetaObjectCallback(
+void ModuleWrap::InitializeImportMetaObjectCallback(
     Local<Context> context, Local<Module> module, Local<Object> meta) {
   Environment* env = Environment::GetCurrent(context);
   CHECK_NOT_NULL(env);  // TODO(addaleax): Handle nullptr here.
@@ -450,31 +453,46 @@ void ModuleWrap::HostInitializeImportMetaObjectCallback(
     return;
   }
 
-  Local<Function> callback =
-      env->host_initialize_import_meta_object_callback();
+  Local<Value> loader_val = context->GetEmbedderData(
+      ContextEmbedderIndex::kModuleLoaderObject);
+
+  if (!loader_val->IsObject() || loader_val->IsUndefined()) {
+    env->ThrowError(
+        "A module loader has not been associated with this context");
+    return;
+  }
+
+  Local<Object> loader = loader_val.As<Object>();
+  Local<Value> method_name = env->initialize_import_meta_string();
+  Local<Function> method = loader->Get(context, method_name)
+      .ToLocalChecked()
+      .As<Function>();
 
   Local<Value> args[] = {
     meta,
     Local<String>::New(env->isolate(), module_wrap->url_),
-    context->GetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject)
   };
 
-  callback->Call(context, Undefined(env->isolate()), arraysize(args), args)
-      .ToLocalChecked();
+  method->Call(context, loader, arraysize(args), args).ToLocalChecked();
 }
 
-void ModuleWrap::SetInitializeImportMetaObjectCallback(
+void ModuleWrap::SetDefaultModuleLoader(
     const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   Isolate* isolate = env->isolate();
+  Local<Context> context = env->context();
 
   CHECK_EQ(args.Length(), 1);
-  CHECK(args[0]->IsFunction());
-  Local<Function> import_meta_callback = args[0].As<Function>();
-  env->set_host_initialize_import_meta_object_callback(import_meta_callback);
+  CHECK(args[0]->IsObject());
+  Local<Object> loader = args[0].As<Object>();
+
+  context->SetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject,
+                           loader);
 
   isolate->SetHostInitializeImportMetaObjectCallback(
-      HostInitializeImportMetaObjectCallback);
+      InitializeImportMetaObjectCallback);
+  isolate->SetHostImportModuleDynamicallyCallback(
+      ImportModuleDynamicallyCallback);
 }
 
 void ModuleWrap::SetModuleLoaderForContext(
@@ -483,18 +501,17 @@ void ModuleWrap::SetModuleLoaderForContext(
   Isolate* isolate = env->isolate();
 
   CHECK_EQ(args.Length(), 2);
-  CHECK(args[1]->IsObject());
+  CHECK(args[0]->IsObject());
   ContextifyContext* sandbox =
       ContextifyContext::ContextFromContextifiedSandbox(
-          env, args[1].As<Object>());
+          env, args[0].As<Object>());
   CHECK_NOT_NULL(sandbox);
   Local<Context> context = sandbox->context();
 
-  CHECK_EQ(args.Length(), 2);
-  CHECK(args[2]->IsObject());
-  Local<Object> loader = args[2].As<Object>();
+  CHECK(args[1]->IsObject());
+  Local<Object> loader = args[1].As<Object>();
 
-  // TODO(zenparsing): Validate that loader has not been assigned
+  // TODO(zenparsing): Validate that a loader has not been assigned
   // to this context already.
   context->SetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject,
                            loader);
@@ -523,11 +540,8 @@ void ModuleWrap::Initialize(Local<Object> target,
   target->Set(env->context(), FIXED_ONE_BYTE_STRING(isolate, "ModuleWrap"),
               tpl->GetFunction(context).ToLocalChecked()).FromJust();
   env->SetMethod(target,
-                 "setImportModuleDynamicallyCallback",
-                 SetImportModuleDynamicallyCallback);
-  env->SetMethod(target,
-                 "setInitializeImportMetaObjectCallback",
-                 SetInitializeImportMetaObjectCallback);
+                 "setDefaultModuleLoader",
+                 SetDefaultModuleLoader);
   env->SetMethod(target,
                  "setModuleLoaderForContext",
                  SetModuleLoaderForContext);

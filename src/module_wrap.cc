@@ -48,23 +48,45 @@ Local<Promise> RejectWithError(Local<Context> context, Local<Value> error) {
   return resolver->GetPromise();
 }
 
+Local<Context> ContextFromSandbox(Environment* env, Local<Value> sandbox) {
+  CHECK(sandbox->IsObject());
+  ContextifyContext* contextify =
+      ContextifyContext::ContextFromContextifiedSandbox(
+        env, sandbox.As<Object>());
+  CHECK_NOT_NULL(contextify);
+  return contextify->context();
+}
+
+MaybeLocal<Object> GetModuleLoaderFromContext(Local<Context> context) {
+  Local<Value> val = context->GetEmbedderData(
+      ContextEmbedderIndex::kModuleLoaderObject);
+
+  return (!val->IsObject() || val->IsUndefined())
+    ? MaybeLocal<Object>()
+    : MaybeLocal<Object>(val.As<Object>());
+}
+
+std::string ToStdString(Isolate* isolate, Local<String> value) {
+  Utf8Value value_utf8(isolate, value.As<String>());
+  std::string value_std(*value_utf8, value_utf8.length());
+  return value_std;
+}
+
+
 }  // anonymous namespace
 
 ModuleWrap::ModuleWrap(Environment* env,
                        Local<Object> object,
                        Local<Module> module,
                        Local<String> url) :
-  BaseObject(env, object),
-  id_(env->get_next_module_id()) {
+  BaseObject(env, object) {
   module_.Reset(env->isolate(), module);
   url_.Reset(env->isolate(), url);
-  env->id_to_module_map.emplace(id_, this);
 }
 
 ModuleWrap::~ModuleWrap() {
   HandleScope scope(env()->isolate());
   Local<Module> module = module_.Get(env()->isolate());
-  env()->id_to_module_map.erase(id_);
   auto range = env()->hash_to_module_map.equal_range(module->GetIdentityHash());
   for (auto it = range.first; it != range.second; ++it) {
     if (it->second == this) {
@@ -83,14 +105,6 @@ ModuleWrap* ModuleWrap::GetFromModule(Environment* env,
     }
   }
   return nullptr;
-}
-
-ModuleWrap* ModuleWrap::GetFromID(Environment* env, uint32_t id) {
-  auto module_wrap_it = env->id_to_module_map.find(id);
-  if (module_wrap_it == env->id_to_module_map.end()) {
-    return nullptr;
-  }
-  return module_wrap_it->second;
 }
 
 void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
@@ -118,12 +132,7 @@ void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
     if (args[2]->IsUndefined()) {
       context = that->CreationContext();
     } else {
-      CHECK(args[2]->IsObject());
-      ContextifyContext* sandbox =
-          ContextifyContext::ContextFromContextifiedSandbox(
-              env, args[2].As<Object>());
-      CHECK_NOT_NULL(sandbox);
-      context = sandbox->context();
+      context = ContextFromSandbox(env, args[2]);
     }
 
     CHECK(args[3]->IsNumber());
@@ -146,6 +155,7 @@ void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
       PrimitiveArray::New(isolate, HostDefinedOptions::kLength);
   host_defined_options->Set(isolate, HostDefinedOptions::kType,
                             Number::New(isolate, ScriptType::kModule));
+  host_defined_options->Set(isolate, HostDefinedOptions::kURL, url);
 
   // compile
   {
@@ -181,8 +191,13 @@ void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
 
   env->hash_to_module_map.emplace(module->GetIdentityHash(), obj);
 
-  host_defined_options->Set(isolate, HostDefinedOptions::kID,
-                            Number::New(isolate, obj->id()));
+  // Initialize resolve cache map to empty handles
+  int requests_count = module->GetModuleRequestsLength();
+  for (int i = 0; i < requests_count; i++) {
+    Local<String> specifier = module->GetModuleRequest(i);
+    std::string specifier_std = ToStdString(isolate, specifier);
+    obj->resolve_cache_[specifier_std].Reset(isolate, Undefined(isolate));
+  }
 
   that->SetIntegrityLevel(context, IntegrityLevel::kFrozen);
   args.GetReturnValue().Set(that);
@@ -195,28 +210,29 @@ void ModuleWrap::ResolveDependency(const FunctionCallbackInfo<Value>& args) {
   CHECK_EQ(args.Length(), 2);
 
   Local<Object> receiver = args.This();
-  ModuleWrap* receiver_wrap;
-  ASSIGN_OR_RETURN_UNWRAP(&receiver_wrap, receiver);
+  ModuleWrap* obj;
+  ASSIGN_OR_RETURN_UNWRAP(&obj, receiver);
 
-  // TODO(zenparsing): Throw if already linked
-  if (receiver_wrap->linked_)
+  if (obj->linked_) {
+    env->ThrowError("linking error, already linked");
     return;
+  }
 
-  // TODO(zenparsing): Throw if specifier is not one of the actual
-  // dependencies.
   CHECK(args[0]->IsString());
-  Local<String> specifier = args[0].As<String>();
-  Utf8Value specifier_utf8(env->isolate(), specifier);
-  std::string specifier_std(*specifier_utf8, specifier_utf8.length());
+  std::string specifier = ToStdString(isolate, args[0].As<String>());
+  if (obj->resolve_cache_.count(specifier) != 1) {
+    env->ThrowError("linking error, invalid specifier");
+    return;
+  }
 
   CHECK(args[1]->IsObject());
   Local<Object> dependency = args[1].As<Object>();
-  if (dependency.IsEmpty() || !dependency->IsObject()) {
+  if (FromJSObject(dependency) == nullptr) {
     env->ThrowError("linking error, expected a valid module object");
+    return;
   }
 
-  receiver_wrap->resolve_cache_[specifier_std].Reset(
-      env->isolate(), dependency);
+  obj->resolve_cache_[specifier].Reset(isolate, dependency);
 }
 
 void ModuleWrap::Instantiate(const FunctionCallbackInfo<Value>& args) {
@@ -229,7 +245,6 @@ void ModuleWrap::Instantiate(const FunctionCallbackInfo<Value>& args) {
   TryCatchScope try_catch(env);
   Maybe<bool> ok = module->InstantiateModule(context, ResolveCallback);
 
-  // clear resolve cache on instantiate
   obj->resolve_cache_.clear();
   obj->linked_ = true;
 
@@ -375,20 +390,19 @@ MaybeLocal<Module> ModuleWrap::ResolveCallback(Local<Context> context,
     return MaybeLocal<Module>();
   }
 
-  Utf8Value specifier_utf8(isolate, specifier);
-  std::string specifier_std(*specifier_utf8, specifier_utf8.length());
-
+  std::string specifier_std = ToStdString(isolate, specifier);
   if (dependent->resolve_cache_.count(specifier_std) != 1) {
     env->ThrowError("linking error, not in local cache");
     return MaybeLocal<Module>();
   }
 
-  Local<Object> module_object =
+  Local<Value> resolve_entry =
       dependent->resolve_cache_[specifier_std].Get(isolate);
 
-  CHECK(!module_object.IsEmpty());
-  CHECK(module_object->IsObject());
+  CHECK(!resolve_entry.IsEmpty());
+  CHECK(resolve_entry->IsObject());
 
+  Local<Object> module_object = resolve_entry.As<Object>();
   ModuleWrap* module;
   ASSIGN_OR_RETURN_UNWRAP(&module, module_object, MaybeLocal<Module>());
   return module->module_.Get(isolate);
@@ -405,75 +419,72 @@ MaybeLocal<Promise> ModuleWrap::ImportModuleDynamicallyCallback(
 
   Local<PrimitiveArray> options = referrer->GetHostDefinedOptions();
   if (options->Length() != HostDefinedOptions::kLength) {
-    Local<String> msg = FIXED_ONE_BYTE_STRING(isolate,
-        "Invalid host defined options");
-    Local<Value> error = v8::Exception::TypeError(msg);
-    Local<Promise> rejection = RejectWithError(context, error);
-    return handle_scope.Escape(rejection);
+    return handle_scope.Escape(RejectWithError(context,
+        v8::Exception::TypeError(FIXED_ONE_BYTE_STRING(isolate,
+          "Invalid host defined options"))));
   }
 
-  Local<Value> loader_val = context->GetEmbedderData(
-      ContextEmbedderIndex::kModuleLoaderObject);
+  Local<Value> url = options
+      ->Get(isolate, HostDefinedOptions::kURL)
+      .As<Value>();
 
-  if (!loader_val->IsObject() || loader_val->IsUndefined()) {
-    Local<String> msg = FIXED_ONE_BYTE_STRING(isolate,
-        "A module loader has not been associated with this context");
-    Local<Value> error = v8::Exception::Error(msg);
-    Local<Promise> rejection = RejectWithError(context, error);
-    return handle_scope.Escape(rejection);
+  if (url.IsEmpty())
+    url = Undefined(isolate);
+
+  Local<Object> loader;
+  if (!GetModuleLoaderFromContext(context).ToLocal(&loader)) {
+    return handle_scope.Escape(RejectWithError(context,
+        v8::Exception::Error(FIXED_ONE_BYTE_STRING(isolate,
+          "A module loader is not associated with this context"))));
   }
 
-  Local<Object> loader = loader_val.As<Object>();
-  Local<Value> method_name = env->import_module_string();
-  Local<Function> method = loader->Get(context, method_name)
-      .ToLocalChecked()
-      .As<Function>();
+  Local<Value> method;
+  if (!loader->Get(context, env->import_module_string()).ToLocal(&method))
+    return MaybeLocal<Promise>();
 
   Local<Value> args[] = {
     Local<Value>(specifier),
-    Local<Value>(referrer->GetResourceName()),
+    url,
   };
 
-  Local<Value> result;
-  if (method->Call(context, loader, arraysize(args), args).ToLocal(&result)) {
-    CHECK(result->IsPromise());
-    return handle_scope.Escape(result.As<Promise>());
-  }
+  CHECK(method->IsFunction());
+  MaybeLocal<Value> result = method
+      .As<Function>()
+      ->Call(context, loader, arraysize(args), args);
 
-  return MaybeLocal<Promise>();
+  if (result.IsEmpty())
+    return MaybeLocal<Promise>();
+
+  Local<Value> result_val = result.ToLocalChecked();
+  CHECK(result_val->IsPromise());
+  return handle_scope.Escape(result_val.As<Promise>());
 }
 
 void ModuleWrap::InitializeImportMetaObjectCallback(
     Local<Context> context, Local<Module> module, Local<Object> meta) {
   Environment* env = Environment::GetCurrent(context);
   CHECK_NOT_NULL(env);  // TODO(addaleax): Handle nullptr here.
+
   ModuleWrap* module_wrap = GetFromModule(env, module);
-
-  if (module_wrap == nullptr) {
+  if (module_wrap == nullptr)
     return;
-  }
 
-  Local<Value> loader_val = context->GetEmbedderData(
-      ContextEmbedderIndex::kModuleLoaderObject);
-
-  if (!loader_val->IsObject() || loader_val->IsUndefined()) {
-    env->ThrowError(
-        "A module loader has not been associated with this context");
+  Local<Object> loader;
+  if (!GetModuleLoaderFromContext(context).ToLocal(&loader))
     return;
-  }
 
-  Local<Object> loader = loader_val.As<Object>();
   Local<Value> method_name = env->initialize_import_meta_string();
-  Local<Function> method = loader->Get(context, method_name)
-      .ToLocalChecked()
-      .As<Function>();
+  Local<Value> method;
+  if (!loader->Get(context, method_name).ToLocal(&method))
+    return;
 
   Local<Value> args[] = {
     meta,
     Local<String>::New(env->isolate(), module_wrap->url_),
   };
 
-  method->Call(context, loader, arraysize(args), args).ToLocalChecked();
+  CHECK(method->IsFunction());
+  method.As<Function>()->Call(context, loader, arraysize(args), args);
 }
 
 void ModuleWrap::SetDefaultModuleLoader(
@@ -501,18 +512,12 @@ void ModuleWrap::SetModuleLoaderForContext(
   Isolate* isolate = env->isolate();
 
   CHECK_EQ(args.Length(), 2);
-  CHECK(args[0]->IsObject());
-  ContextifyContext* sandbox =
-      ContextifyContext::ContextFromContextifiedSandbox(
-          env, args[0].As<Object>());
-  CHECK_NOT_NULL(sandbox);
-  Local<Context> context = sandbox->context();
+  Local<Context> context = ContextFromSandbox(env, args[0]);
 
   CHECK(args[1]->IsObject());
   Local<Object> loader = args[1].As<Object>();
 
-  // TODO(zenparsing): Validate that a loader has not been assigned
-  // to this context already.
+  CHECK(GetModuleLoaderFromContext(context).IsEmpty());
   context->SetEmbedderData(ContextEmbedderIndex::kModuleLoaderObject,
                            loader);
 }

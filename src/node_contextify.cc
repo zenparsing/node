@@ -56,6 +56,7 @@ using v8::NamedPropertyHandlerConfiguration;
 using v8::Number;
 using v8::Object;
 using v8::ObjectTemplate;
+using v8::Primitive;
 using v8::PrimitiveArray;
 using v8::PropertyAttribute;
 using v8::PropertyCallbackInfo;
@@ -285,15 +286,6 @@ void ContextifyContext::WeakCallback(
     const WeakCallbackInfo<ContextifyContext>& data) {
   ContextifyContext* context = data.GetParameter();
   delete context;
-}
-
-void ContextifyContext::WeakCallbackCompileFn(
-    const WeakCallbackInfo<CompileFnEntry>& data) {
-  CompileFnEntry* entry = data.GetParameter();
-  if (entry->env->compile_fn_entries.erase(entry) != 0) {
-    entry->env->id_to_function_map.erase(entry->id);
-    delete entry;
-  }
 }
 
 // static
@@ -646,11 +638,13 @@ void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
   Local<ArrayBufferView> cached_data_buf;
   bool produce_cached_data = false;
   Local<Context> parsing_context = context;
+  Local<Primitive> url = Undefined(isolate);
 
   if (argc > 2) {
     // new ContextifyScript(code, filename, lineOffset, columnOffset,
-    //                      cachedData, produceCachedData, parsingContext)
-    CHECK_EQ(argc, 7);
+    //                      cachedData, produceCachedData, parsingContext,
+    //                      url)
+    CHECK_EQ(argc, 8);
     CHECK(args[2]->IsNumber());
     line_offset = args[2].As<Integer>();
     CHECK(args[3]->IsNumber());
@@ -668,6 +662,10 @@ void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
               env, args[6].As<Object>());
       CHECK_NOT_NULL(sandbox);
       parsing_context = sandbox->context();
+    }
+    if (!args[7]->IsUndefined()) {
+      CHECK(args[7]->IsString());
+      url = args[7].As<String>();
     }
   } else {
     line_offset = Integer::New(isolate, 0);
@@ -699,8 +697,8 @@ void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
       PrimitiveArray::New(isolate, loader::HostDefinedOptions::kLength);
   host_defined_options->Set(isolate, loader::HostDefinedOptions::kType,
                             Number::New(isolate, loader::ScriptType::kScript));
-  host_defined_options->Set(isolate, loader::HostDefinedOptions::kID,
-                            Number::New(isolate, contextify_script->id()));
+  host_defined_options->Set(isolate, loader::HostDefinedOptions::kURL,
+                            url);
 
   ScriptOrigin origin(filename,
                       line_offset,                          // line offset
@@ -957,15 +955,8 @@ bool ContextifyScript::EvalMachine(Environment* env,
 
 
 ContextifyScript::ContextifyScript(Environment* env, Local<Object> object)
-    : BaseObject(env, object),
-      id_(env->get_next_script_id()) {
+    : BaseObject(env, object) {
   MakeWeak();
-  env->id_to_script_map.emplace(id_, this);
-}
-
-
-ContextifyScript::~ContextifyScript() {
-  env()->id_to_script_map.erase(id_);
 }
 
 
@@ -1029,6 +1020,13 @@ void ContextifyContext::CompileFunction(
     params_buf = args[8].As<Array>();
   }
 
+  // Argument 10: url (optional)
+  Local<Primitive> url = Undefined(isolate);
+  if (!args[9]->IsUndefined()) {
+    CHECK(args[9]->IsString());
+    url = args[9].As<String>();
+  }
+
   // Read cache from cached data buffer
   ScriptCompiler::CachedData* cached_data = nullptr;
   if (!cached_data_buf.IsEmpty()) {
@@ -1038,9 +1036,6 @@ void ContextifyContext::CompileFunction(
       data + cached_data_buf->ByteOffset(), cached_data_buf->ByteLength());
   }
 
-  // Get the function id
-  uint32_t id = env->get_next_function_id();
-
   // Set host_defined_options
   Local<PrimitiveArray> host_defined_options =
       PrimitiveArray::New(isolate, loader::HostDefinedOptions::kLength);
@@ -1049,7 +1044,9 @@ void ContextifyContext::CompileFunction(
       loader::HostDefinedOptions::kType,
       Number::New(isolate, loader::ScriptType::kFunction));
   host_defined_options->Set(
-      isolate, loader::HostDefinedOptions::kID, Number::New(isolate, id));
+      isolate,
+      loader::HostDefinedOptions::kURL,
+      url);
 
   ScriptOrigin origin(filename,
                       line_offset,       // line offset
@@ -1105,13 +1102,6 @@ void ContextifyContext::CompileFunction(
     return;
   }
   Local<Function> fn = maybe_fn.ToLocalChecked();
-  env->id_to_function_map.emplace(std::piecewise_construct,
-                                  std::make_tuple(id),
-                                  std::make_tuple(isolate, fn));
-  CompileFnEntry* gc_entry = new CompileFnEntry(env, id);
-  env->id_to_function_map[id].SetWeak(gc_entry,
-      WeakCallbackCompileFn,
-      v8::WeakCallbackType::kParameter);
 
   if (produce_cached_data) {
     const std::unique_ptr<ScriptCompiler::CachedData> cached_data(

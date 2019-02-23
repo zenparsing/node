@@ -191,7 +191,7 @@ void ModuleWrap::New(const FunctionCallbackInfo<Value>& args) {
 
   env->hash_to_module_map.emplace(module->GetIdentityHash(), obj);
 
-  // Initialize resolve cache map to empty handles
+  // Initialize resolve cache map to undefined
   int requests_count = module->GetModuleRequestsLength();
   for (int i = 0; i < requests_count; i++) {
     Local<String> specifier = module->GetModuleRequest(i);
